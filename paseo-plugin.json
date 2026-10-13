@@ -1,0 +1,6 @@
+{
+  "id": "paseo-agentes",
+  "name": "Agentes por estado",
+  "description": "En la barra lateral, los agentes de todos los workspaces que te preguntan, los que están en marcha y los que acabaron sin que los vieras; una fila abre su agente.",
+  "requirements": { "paseo": ">=0.11.2 <0.12.0" }
+}
