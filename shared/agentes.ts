@@ -8,6 +8,8 @@ export interface Agente {
   readonly requiresAttention?: boolean;
   readonly attentionReason?: "finished" | "error" | "permission" | null;
   readonly attentionTimestamp?: string | null;
+  readonly workspaceId?: string;
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
 // The same buckets and Spanish labels as Paseo's status view (`STATUS_BUCKET_ORDER` and `statusBucket` in its i18n).
@@ -25,23 +27,60 @@ const GRUPOS = Object.keys(TITULOS) as Grupo[];
 /**
  * Paseo's own precedence (`deriveAgentStateBucket` of its protocol): data it needs beats an error, which beats a running
  * turn, which beats an end nobody has opened yet; everything else is done. `requiresAttention` is cleared by Paseo when
- * the agent is viewed.
+ * the agent is viewed. `enMarcha`: something of the agent's still runs (a child agent or a Claude subagent).
  */
-export function grupoDe(agente: Agente): Grupo {
+export function grupoDe(agente: Agente, enMarcha = false): Grupo {
   if (agente.pendingPermissions.length > 0 || agente.attentionReason === "permission") return "necesitaDatos";
   if (agente.status === "error" || agente.attentionReason === "error") return "conError";
-  if (agente.status === "running") return "enEjecucion";
+  if (agente.status === "running" || enMarcha) return "enEjecucion";
   return agente.requiresAttention ? "paraRevisar" : "terminado";
 }
 
-/** The non-empty groups in that order, newest first by a time that stays put while an agent streams, so rows do not move under the pointer. */
-export function agrupar<T extends Agente>(agentes: readonly T[]): { grupo: Grupo; titulo: string; agentes: T[] }[] {
+const PADRE = "paseo.parent-agent-id";
+
+/**
+ * Paseo's `resolveWorkspaceRootAgent` (server workspace-directory.ts): up through parents while they share the workspace.
+ * A child in another workspace is a root there; one whose parent is gone (archived) belongs to no one.
+ */
+export function raizDe<T extends Agente>(agente: T, porId: ReadonlyMap<string, T>): T | null {
+  const vistos = new Set([agente.id]);
+  let actual = agente;
+  for (;;) {
+    const padreId = actual.labels?.[PADRE];
+    if (!padreId) return actual;
+    const padre = porId.get(padreId);
+    if (!padre || vistos.has(padreId)) return null;
+    if (padre.workspaceId !== actual.workspaceId) return actual;
+    vistos.add(padreId);
+    actual = padre;
+  }
+}
+
+/**
+ * The rows by the rules of Paseo's workspace status (server workspace-directory.ts), so this block and the status view agree:
+ * only workspace roots are rows; a running child in the same workspace, or a running Claude subagent of the agent or of such
+ * a child (`conSubagentes`: their parent agent ids), makes the root running. The non-empty groups in order, newest first by a
+ * time that stays put while an agent streams, so rows do not move under the pointer.
+ */
+export function agrupar<T extends Agente>(
+  agentes: readonly T[],
+  conSubagentes: ReadonlySet<string> = new Set(),
+): { grupo: Grupo; titulo: string; agentes: T[] }[] {
+  const porId = new Map(agentes.map((agente) => [agente.id, agente]));
+  const enMarcha = new Set<string>();
+  for (const agente of agentes) {
+    const raiz = raizDe(agente, porId);
+    if (raiz && (conSubagentes.has(agente.id) || (raiz !== agente && agente.status === "running"))) enMarcha.add(raiz.id);
+  }
+  const filas = agentes.filter((agente) => raizDe(agente, porId) === agente);
   const desde = (agente: Agente) => agente.attentionTimestamp ?? agente.createdAt;
   return GRUPOS
     .map((grupo) => ({
       grupo,
       titulo: TITULOS[grupo],
-      agentes: agentes.filter((agente) => grupoDe(agente) === grupo).sort((a, b) => desde(b).localeCompare(desde(a))),
+      agentes: filas
+        .filter((agente) => grupoDe(agente, enMarcha.has(agente.id)) === grupo)
+        .sort((a, b) => desde(b).localeCompare(desde(a))),
     }))
     .filter((grupo) => grupo.agentes.length > 0);
 }
