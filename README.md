@@ -21,8 +21,9 @@ misma paleta y la misma clave (`projectKey` si ningún otro proyecto del host la
 Una imagen propia del proyecto no se copia: sale la inicial. Un agente que falló lleva además una ✕ roja a la derecha.
 
 La cabecera «Agentes» pliega y despliega el bloque y, plegado, deja una línea con el número de cada grupo; el título de
-cada grupo pliega el suyo. Lo plegado se guarda en `localStorage` (`paseo-agentes:plegado`) en la web y el escritorio; en
-el móvil dura hasta cerrar la app. Desplegado, el bloque ocupa como mucho el 60 % del alto de la ventana y se desplaza.
+cada grupo pliega el suyo. Bajo la cabecera, el icono de cada proyecto con agentes: pulsarlo lo oculta (queda atenuado)
+y vuelve a pulsarlo lo muestra, para ver solo las sesiones de unos workspaces o sin ellos. Lo plegado y lo oculto se
+guardan en `localStorage` (`paseo-agentes:plegado`) en la web y el escritorio; en el móvil dura hasta cerrar la app. Desplegado, el bloque ocupa como mucho el 60 % del alto de la ventana y se desplaza.
 
 Pulsar una fila abre el agente en su workspace. Paseo 0.11 solo da `navigation.openAgent` a pantallas y paneles, no a
 los elementos de la barra lateral: la fila abre la pantalla `abrir` del plugin, que abre el agente al montarse, y la

@@ -21,6 +21,7 @@ function icono(name: string): Dibujo {
 // The icons of Paseo's own status view.
 const ICONOS: Record<Grupo, Dibujo> = { pregunta: icono("CircleAlert"), marcha: icono("CircleDot"), sinVer: icono("CircleCheck") };
 const ICONO_ERROR = icono("CircleX");
+const ICONO_SIN_PROYECTO = icono("Circle");
 const ABIERTO = icono("ChevronDown");
 const CERRADO = icono("ChevronRight");
 
@@ -113,10 +114,21 @@ export function contributeAgentes(client: PluginClientContext): () => void {
 
   function AgentesItem({ theme, host, openScreen }: PluginSidebarItemProps) {
     const { agentes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
-    const grupos = useMemo(() => agrupar(agentes), [agentes]);
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
-    if (!error && grupos.length === 0) return null;
+    // The filter is per project; an agent whose project is unknown is never hidden by it.
+    const visibles = useMemo(
+      () => agentes.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId)),
+      [agentes, plegado.ocultos],
+    );
+    const grupos = useMemo(() => agrupar(visibles), [visibles]);
+    // One chip per project with agents, most crowded first: its badge toggles the project in and out.
+    const fichas = useMemo(() => {
+      const conteo = new Map<string, number>();
+      for (const agente of agentes) if (agente.projectId) conteo.set(agente.projectId, (conteo.get(agente.projectId) ?? 0) + 1);
+      return [...conteo].sort(([, a], [, b]) => b - a);
+    }, [agentes]);
+    if (!error && agentes.length === 0) return null;
     const tenue = theme.colors.foregroundMuted;
     const texto = { color: tenue, fontSize: 11 };
     // Left edge of the rows' icons: the row's padding plus its button's.
@@ -147,6 +159,29 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         {error ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
         {plegado.bloque ? null : (
           <ScrollView style={{ maxHeight: Math.round(height * 0.6) }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingLeft: 16, paddingTop: 4, paddingBottom: 4 }}>
+              {fichas.map(([projectId, numero]) => {
+                const insignia = iconos.get(projectId);
+                const oculto = plegado.ocultos.includes(projectId);
+                const nombre = proyectos.find((proyecto) => proyecto.projectId === projectId);
+                const Ficha = insignia ? dibujo(insignia) : ICONO_SIN_PROYECTO;
+                return (
+                  <Pressable
+                    key={projectId}
+                    accessibilityRole="button"
+                    accessibilityLabel={nombre?.projectCustomName ?? nombre?.projectDisplayName ?? projectId}
+                    accessibilityState={{ selected: !oculto }}
+                    onPress={() =>
+                      pliega({ ...plegado, ocultos: oculto ? plegado.ocultos.filter((otro) => otro !== projectId) : [...plegado.ocultos, projectId] })
+                    }
+                    style={{ flexDirection: "row", alignItems: "center", gap: 3, opacity: oculto ? 0.35 : 1 }}
+                  >
+                    <Ficha size={14} color={tenue} />
+                    <Text style={texto}>{numero}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
             {grupos.map(({ grupo, titulo, agentes }) => {
               const abierto = !plegado.grupos.includes(grupo);
               const Flecha = abierto ? ABIERTO : CERRADO;

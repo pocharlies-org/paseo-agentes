@@ -44,9 +44,13 @@ test("groups come in order, empty ones are left out, and the newest is first", (
 });
 
 test("a stored fold is read back, and a broken or foreign one reads as nothing folded", () => {
-  assert.deepEqual(leePlegado(JSON.stringify({ bloque: true, grupos: ["sinVer", "otro", "toString"] })), { bloque: true, grupos: ["sinVer"] });
+  assert.deepEqual(leePlegado(JSON.stringify({ bloque: true, grupos: ["sinVer", "otro", "toString"], ocultos: ["prj_1", 7] })), {
+    bloque: true,
+    grupos: ["sinVer"],
+    ocultos: ["prj_1"],
+  });
   for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}']) {
-    assert.deepEqual(leePlegado(texto), { bloque: false, grupos: [] });
+    assert.deepEqual(leePlegado(texto), { bloque: false, grupos: [], ocultos: [] });
   }
 });
 
