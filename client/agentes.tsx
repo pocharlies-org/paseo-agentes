@@ -19,8 +19,13 @@ function icono(name: string): Dibujo {
 }
 
 // The icons of Paseo's own status view.
-const ICONOS: Record<Grupo, Dibujo> = { pregunta: icono("CircleAlert"), marcha: icono("CircleDot"), sinVer: icono("CircleCheck") };
-const ICONO_ERROR = icono("CircleX");
+const ICONOS: Record<Grupo, Dibujo> = {
+  necesitaDatos: icono("CircleAlert"),
+  conError: icono("CircleX"),
+  paraRevisar: icono("CircleCheck"),
+  enEjecucion: icono("CircleDot"),
+  terminado: icono("Check"),
+};
 const ICONO_SIN_PROYECTO = icono("Circle");
 const ABIERTO = icono("ChevronDown");
 const CERRADO = icono("ChevronRight");
@@ -208,11 +213,6 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                             icon={insignia ? dibujo(insignia) : ICONOS[grupo]}
                             label={agente.title ?? "Sin título"}
                             onPress={() => openScreen({ screenId: "abrir", params: { agentId: agente.id } })}
-                            trailing={
-                              grupo === "sinVer" && agente.attentionReason === "error" ? (
-                                <ICONO_ERROR size={14} color={theme.colors.statusDanger} />
-                              ) : undefined
-                            }
                           />
                         );
                       })

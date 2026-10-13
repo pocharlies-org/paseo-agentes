@@ -10,19 +10,28 @@ export interface Agente {
   readonly attentionTimestamp?: string | null;
 }
 
-export type Grupo = "pregunta" | "marcha" | "sinVer";
+// The same buckets and Spanish labels as Paseo's status view (`STATUS_BUCKET_ORDER` and `statusBucket` in its i18n).
+export type Grupo = "necesitaDatos" | "conError" | "paraRevisar" | "enEjecucion" | "terminado";
 
-const TITULOS: Record<Grupo, string> = { pregunta: "Te preguntan", marcha: "En marcha", sinVer: "Sin ver" };
+const TITULOS: Record<Grupo, string> = {
+  necesitaDatos: "Necesita datos",
+  conError: "Con error",
+  paraRevisar: "Para revisar",
+  enEjecucion: "En ejecución",
+  terminado: "Terminado",
+};
 const GRUPOS = Object.keys(TITULOS) as Grupo[];
 
 /**
- * Paseo's own precedence (`deriveAgentStateBucket` of its protocol): a pending permission or question beats a running turn,
- * which beats an end nobody has opened yet. `requiresAttention` is cleared by Paseo when the agent is viewed.
+ * Paseo's own precedence (`deriveAgentStateBucket` of its protocol): data it needs beats an error, which beats a running
+ * turn, which beats an end nobody has opened yet; everything else is done. `requiresAttention` is cleared by Paseo when
+ * the agent is viewed.
  */
-export function grupoDe(agente: Agente): Grupo | null {
-  if (agente.pendingPermissions.length > 0 || agente.attentionReason === "permission") return "pregunta";
-  if (agente.status === "running") return "marcha";
-  return agente.requiresAttention ? "sinVer" : null;
+export function grupoDe(agente: Agente): Grupo {
+  if (agente.pendingPermissions.length > 0 || agente.attentionReason === "permission") return "necesitaDatos";
+  if (agente.status === "error" || agente.attentionReason === "error") return "conError";
+  if (agente.status === "running") return "enEjecucion";
+  return agente.requiresAttention ? "paraRevisar" : "terminado";
 }
 
 /** The non-empty groups in that order, newest first by a time that stays put while an agent streams, so rows do not move under the pointer. */
@@ -52,9 +61,12 @@ export function leePlegado(texto: string | null): Plegado {
   } catch {
     // A broken value reads as nothing folded; the next fold overwrites it.
   }
+  const grupos = Array.isArray(valor?.grupos) ? valor.grupos.filter((grupo): grupo is Grupo => GRUPOS.includes(grupo)) : [];
+  // "Terminado" arrived later: with nothing stored, or a save from before it existed, it starts folded so the block does not flood.
+  const anterior = valor === null || valor.ocultos === undefined;
   return {
     bloque: valor?.bloque === true,
-    grupos: Array.isArray(valor?.grupos) ? valor.grupos.filter((grupo): grupo is Grupo => GRUPOS.includes(grupo)) : [],
+    grupos: anterior && !grupos.includes("terminado") ? [...grupos, "terminado"] : grupos,
     ocultos: Array.isArray(valor?.ocultos) ? valor.ocultos.filter((clave): clave is string => typeof clave === "string") : [],
   };
 }
