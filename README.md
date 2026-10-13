@@ -33,17 +33,27 @@ Pulsar una fila abre el agente en su workspace. Paseo 0.11 solo da `navigation.o
 los elementos de la barra lateral: la fila abre la pantalla `abrir` del plugin, que abre el agente al montarse, y la
 navegación de workspaces de Paseo vuelve al host sin dejarla en el historial.
 
-## Límite conocido: watchers y subagentes en segundo plano
+## Las mismas reglas que la vista de estado
 
-Un agente con un `Bash` en segundo plano o un subagente vivo sigue apareciendo como «Terminado»: el daemon de Paseo marca
-`running` solo mientras el modelo emite, ese estado no abre turno y el snapshot no lo expone (`activeTurn` nulo). Ningún
-plugin puede verlo; hace falta que Paseo exponga el estado de sesión de Claude.
+El estado de cada fila sigue las reglas con que el daemon calcula la vista de estado de los workspaces
+(`workspace-directory.ts`), para que el bloque y esa vista digan lo mismo:
+
+- Solo son filas los agentes raíz de su workspace. Un agente hijo (`paseo.parent-agent-id`) del mismo workspace no sale:
+  mientras corre, su raíz sale «En ejecución». Un hijo en otro workspace es raíz allí; uno cuyo padre ya no está, no sale.
+- Un agente con un subagente de Claude vivo (la herramienta Task en segundo plano o un workflow) sale «En ejecución»
+  aunque su turno haya acabado. Se sabe por el evento `agent.provider_subagents.update`, que no trae foto inicial: un
+  subagente que ya corría al cargar el plugin se ve en su siguiente acción o al acabar.
+- Un `Bash` en segundo plano (un watcher) no cuenta en ninguna de las dos vistas: Paseo no lo trata como subagente.
+
+La vista de abajo agrupa workspaces y este bloque agentes: un workspace sale «En ejecución» si cualquiera de sus agentes
+corre, aunque otro de ellos esté «Para revisar».
 
 ## Qué lee y envía
 
 El directorio de agentes del daemon, con la suscripción del SDK (`paseo.agents.list({ subscribe: {} })`): una foto
 al empezar y un `agent_update` por cambio, sin sondeo. Y la lista de proyectos (`paseo.projects.list()`), que relee entera
-con cada `project.update` para el icono de las filas. No tiene parte de servidor ni RPCs, no escribe en el daemon (solo guarda lo plegado en el cliente) y no llama a
+con cada `project.update` para el icono de las filas. Y el evento de subagentes de Claude
+(`observeEvents(["agent.provider_subagents.update"])`), del que solo usa altas, cambios de estado y bajas. No tiene parte de servidor ni RPCs, no escribe en el daemon (solo guarda lo plegado en el cliente) y no llama a
 nadie fuera del daemon.
 
 ## Instalación

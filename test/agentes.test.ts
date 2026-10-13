@@ -79,3 +79,21 @@ test("a project gets the letter and color of Paseo's workspace list", () => {
   assert.notEqual(iconos.get("a")?.color, undefined);
   assert.deepEqual(insignias(servidor, [{ projectId: "a", projectDisplayName: "clon" }]).get("a"), iconos.get("a"));
 });
+
+test("rows and groups follow Paseo's workspace status: children and Claude subagents run through their root", () => {
+  const filas = (agentes: Agente[], conSubagentes?: Set<string>) =>
+    agrupar(agentes, conSubagentes).map(({ titulo, agentes }) => [titulo, agentes.map(({ id }) => id)]);
+  const padre = agente("padre", { workspaceId: "w1", requiresAttention: true });
+  const hijo = (id: string, extra: Partial<Agente> = {}) => agente(id, { workspaceId: "w1", labels: { "paseo.parent-agent-id": "padre" }, ...extra });
+
+  // A child in its parent's workspace is no row: running, it makes the root run; idle and unseen, it adds nothing.
+  assert.deepEqual(filas([padre, hijo("corre", { status: "running" })]), [["En ejecución", ["padre"]]]);
+  assert.deepEqual(filas([padre, hijo("acabado", { requiresAttention: true })]), [["Para revisar", ["padre"]]]);
+  // A child in another workspace is a root there; one whose parent is gone belongs to no one.
+  assert.deepEqual(filas([padre, hijo("fuera", { workspaceId: "w2" })]), [["Para revisar", ["padre"]], ["Terminado", ["fuera"]]]);
+  assert.deepEqual(filas([hijo("huerfano", { status: "running" })]), []);
+  // A running Claude subagent of the agent, or of its child, makes the root run; a question still wins.
+  assert.deepEqual(filas([padre], new Set(["padre"])), [["En ejecución", ["padre"]]]);
+  assert.deepEqual(filas([padre, hijo("h")], new Set(["h"])), [["En ejecución", ["padre"]]]);
+  assert.deepEqual(filas([{ ...padre, pendingPermissions: [{}] }], new Set(["padre"])), [["Necesita datos", ["padre"]]]);
+});

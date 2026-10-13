@@ -54,6 +54,8 @@ type Fila = Agente & { readonly projectId: string | null };
 
 interface Foto {
   readonly agentes: readonly Fila[];
+  /** The agents with a Claude subagent running: Paseo's status view counts them as running. */
+  readonly conSubagentes: ReadonlySet<string>;
   readonly proyectos: readonly Proyecto[];
   readonly plegado: Plegado;
   readonly error: string | null;
@@ -67,7 +69,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], conSubagentes: new Set(), proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -107,6 +109,31 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   const sueltaProyectos = client.paseo.projects.subscribe(() => void leeProyectos());
   void leeProyectos();
 
+  // Running Claude subagents (Task tool and workflows; background shells are not subagents for Paseo either), by parent and id.
+  // shortcut: the event stream has no snapshot, so a subagent already running when this loads shows from its next action or
+  // its end; upgrade if the plugin API gets a subagent list.
+  const subagentes = new Map<string, string>();
+  const muestraSubagentes = () => publica({ conSubagentes: new Set(subagentes.values()) });
+  client.paseo.observeEvents(["agent.provider_subagents.update"], { signal: lifetime.signal }).subscribe({
+    // Delivered again after a reconnect: whatever ended meanwhile must not stay running.
+    snapshot: () => {
+      subagentes.clear();
+      muestraSubagentes();
+    },
+    update: (message) => {
+      if (message.type !== "agent.provider_subagents.update") return;
+      const update = message.payload;
+      if (update.kind === "upsert") {
+        const clave = `${update.subagent.parentAgentId} ${update.subagent.id}`;
+        if (update.subagent.status === "running") subagentes.set(clave, update.subagent.parentAgentId);
+        else subagentes.delete(clave);
+      } else if (update.kind === "remove") subagentes.delete(`${update.parentAgentId} ${update.subagentId}`);
+      else return;
+      muestraSubagentes();
+    },
+    error: falla,
+  });
+
   const suscribe = (aviso: () => void) => {
     avisos.add(aviso);
     return () => void avisos.delete(aviso);
@@ -118,22 +145,28 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   };
 
   function AgentesItem({ theme, host, openScreen }: PluginSidebarItemProps) {
-    const { agentes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
+    const { agentes, conSubagentes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
-    // The filter is per project; an agent whose project is unknown is never hidden by it.
-    const visibles = useMemo(
-      () => agentes.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId)),
-      [agentes, plegado.ocultos],
+    const todos = useMemo(() => agrupar(agentes, conSubagentes), [agentes, conSubagentes]);
+    // The filter is per project, after grouping so it hides rows and never a parent its children depend on; an agent whose
+    // project is unknown is never hidden by it.
+    const grupos = useMemo(
+      () =>
+        todos
+          .map((grupo) => ({ ...grupo, agentes: grupo.agentes.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId)) }))
+          .filter((grupo) => grupo.agentes.length > 0),
+      [todos, plegado.ocultos],
     );
-    const grupos = useMemo(() => agrupar(visibles), [visibles]);
-    // One chip per project with agents, most crowded first: its badge toggles the project in and out.
+    // One chip per project with rows, most crowded first: its badge toggles the project in and out.
     const fichas = useMemo(() => {
       const conteo = new Map<string, number>();
-      for (const agente of agentes) if (agente.projectId) conteo.set(agente.projectId, (conteo.get(agente.projectId) ?? 0) + 1);
+      for (const { agentes: filas } of todos) {
+        for (const { projectId } of filas) if (projectId) conteo.set(projectId, (conteo.get(projectId) ?? 0) + 1);
+      }
       return [...conteo].sort(([, a], [, b]) => b - a);
-    }, [agentes]);
-    if (!error && agentes.length === 0) return null;
+    }, [todos]);
+    if (!error && todos.length === 0) return null;
     const tenue = theme.colors.foregroundMuted;
     const texto = { color: tenue, fontSize: 11 };
     // Left edge of the rows' icons: the row's padding plus its button's.
