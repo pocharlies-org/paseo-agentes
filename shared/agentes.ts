@@ -37,15 +37,16 @@ export function agrupar<T extends Agente>(agentes: readonly T[]): { grupo: Grupo
     .filter((grupo) => grupo.agentes.length > 0);
 }
 
-/** What is folded: the whole block, and the groups closed inside it. */
+/** What is folded: the whole block, the groups closed inside it, and the projects filtered out. */
 export interface Plegado {
   readonly bloque: boolean;
   readonly grupos: readonly Grupo[];
+  readonly ocultos: readonly string[];
 }
 
 /** The fold as stored, read defensively: the storage is shared with Paseo and anything else on its origin. */
 export function leePlegado(texto: string | null): Plegado {
-  let valor: { bloque?: unknown; grupos?: unknown } | null = null;
+  let valor: { bloque?: unknown; grupos?: unknown; ocultos?: unknown } | null = null;
   try {
     valor = JSON.parse(texto ?? "null");
   } catch {
@@ -54,6 +55,7 @@ export function leePlegado(texto: string | null): Plegado {
   return {
     bloque: valor?.bloque === true,
     grupos: Array.isArray(valor?.grupos) ? valor.grupos.filter((grupo): grupo is Grupo => GRUPOS.includes(grupo)) : [],
+    ocultos: Array.isArray(valor?.ocultos) ? valor.ocultos.filter((clave): clave is string => typeof clave === "string") : [],
   };
 }
 
