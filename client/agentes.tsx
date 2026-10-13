@@ -1,11 +1,24 @@
 import type { PluginClientContext, PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
 import { Fragment, useEffect, useMemo, useSyncExternalStore } from "react";
-import { ScrollView, Text } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { agrupar, type Agente, type Grupo } from "../shared/agentes.ts";
 
+// Paseo's row lets a bare glyph shrink when the title wraps to two lines; inside a View it keeps its size.
+function icono(name: string) {
+  return function Icono({ size, color }: { size: number; color: string }) {
+    return (
+      <View>
+        <Icon name={name} size={size} color={color} />
+      </View>
+    );
+  };
+}
+
 // The icons of Paseo's own status view.
-const ICONOS: Record<Grupo, string> = { pregunta: "CircleAlert", marcha: "CircleDot", sinVer: "CircleCheck" };
+const ICONOS: Record<Grupo, ReturnType<typeof icono>> = { pregunta: icono("CircleAlert"), marcha: icono("CircleDot"), sinVer: icono("CircleCheck") };
+const ICONO_ERROR = icono("CircleX");
 
 /**
  * The agents of every workspace of this host that ask something, run, or ended unseen, in the sidebar header. It follows the
@@ -66,7 +79,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 <SidebarRow
                   key={agente.id}
                   id={agente.id}
-                  icon={grupo === "sinVer" && agente.attentionReason === "error" ? "CircleX" : ICONOS[grupo]}
+                  icon={grupo === "sinVer" && agente.attentionReason === "error" ? ICONO_ERROR : ICONOS[grupo]}
                   label={agente.title ?? "Sin título"}
                   onPress={() => openScreen({ screenId: "abrir", params: { agentId: agente.id } })}
                 />
