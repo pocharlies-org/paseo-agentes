@@ -31,10 +31,12 @@ test("groups come in order, empty ones are left out, and the newest is first", (
     agente("viejo", { status: "running", createdAt: "2026-10-13T09:00:00.000Z" }),
     agente("acabado", { requiresAttention: true, attentionTimestamp: "2026-10-13T11:00:00.000Z" }),
     agente("nuevo", { status: "running", createdAt: "2026-10-13T12:00:00.000Z" }),
+    agente("pregunta", { pendingPermissions: [{}], attentionTimestamp: "2026-10-13T08:00:00.000Z" }),
   ]);
   assert.deepEqual(
     grupos.map(({ titulo, agentes }) => [titulo, agentes.map(({ id }) => id)]),
     [
+      ["Te preguntan", ["pregunta"]],
       ["En marcha", ["nuevo", "viejo"]],
       ["Sin ver", ["acabado"]],
     ],
