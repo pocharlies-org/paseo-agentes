@@ -6,19 +6,23 @@ workspaces, no agentes: con un workspace por área no se ve qué agente espera.
 
 ## Qué enseña
 
+Los grupos son los mismos cubos y nombres de la vista de estado de Paseo (`STATUS_BUCKET_ORDER` y su i18n), en su orden:
+
 | Grupo | Cuándo |
 |---|---|
-| Te preguntan | permiso o pregunta (`AskUserQuestion`) pendiente |
-| En marcha | turno en curso |
-| Sin ver | acabó o falló y no se ha abierto desde entonces (`requiresAttention` de Paseo, que lo borra al verlo) |
+| Necesita datos | permiso o pregunta (`AskUserQuestion`) pendiente |
+| Con error | el turno acabó en error |
+| Para revisar | acabó y no se ha abierto desde entonces (`requiresAttention` de Paseo, que lo borra al verlo) |
+| En ejecución | turno en curso |
+| Terminado | visto y sin nada pendiente; sale plegado por defecto para no inundar |
 
-La precedencia es la de Paseo (`deriveAgentStateBucket`): una pregunta gana a un turno en curso y este a un final sin ver.
+La precedencia es la de Paseo (`deriveAgentStateBucket`): los datos que pide ganan al error, el error al turno en curso y este al final sin ver.
 Los grupos vacíos no salen; sin nada pendiente el elemento no ocupa sitio. Dentro de un grupo, el más reciente arriba,
 por una hora que no cambia mientras el agente emite (las filas no saltan bajo el puntero).
 
 Cada fila lleva el icono de su proyecto como lo pinta la lista de workspaces de Paseo: la inicial sobre su color, con la
 misma paleta y la misma clave (`projectKey` si ningún otro proyecto del host la comparte; si no, host y `projectId`).
-Una imagen propia del proyecto no se copia: sale la inicial. Un agente que falló lleva además una ✕ roja a la derecha.
+Una imagen propia del proyecto no se copia: sale la inicial. El estado de cada agente lo dice su grupo.
 
 La cabecera «Agentes» pliega y despliega el bloque y, plegado, deja una línea con el número de cada grupo; el título de
 cada grupo pliega el suyo. Bajo la cabecera, el icono de cada proyecto con agentes: pulsarlo lo oculta (queda atenuado)
@@ -28,6 +32,12 @@ guardan en `localStorage` (`paseo-agentes:plegado`) en la web y el escritorio; e
 Pulsar una fila abre el agente en su workspace. Paseo 0.11 solo da `navigation.openAgent` a pantallas y paneles, no a
 los elementos de la barra lateral: la fila abre la pantalla `abrir` del plugin, que abre el agente al montarse, y la
 navegación de workspaces de Paseo vuelve al host sin dejarla en el historial.
+
+## Límite conocido: watchers y subagentes en segundo plano
+
+Un agente con un `Bash` en segundo plano o un subagente vivo sigue apareciendo como «Terminado»: el daemon de Paseo marca
+`running` solo mientras el modelo emite, ese estado no abre turno y el snapshot no lo expone (`activeTurn` nulo). Ningún
+plugin puede verlo; hace falta que Paseo exponga el estado de sesión de Claude.
 
 ## Qué lee y envía
 

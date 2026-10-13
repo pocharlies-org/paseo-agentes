@@ -11,18 +11,19 @@ const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   ...extra,
 });
 
-test("a pending question beats a running turn, which beats an unseen end", () => {
-  assert.equal(grupoDe(agente("a", { status: "running", pendingPermissions: [{}] })), "pregunta");
-  assert.equal(grupoDe(agente("b", { attentionReason: "permission", requiresAttention: true })), "pregunta");
-  assert.equal(grupoDe(agente("c", { status: "running", requiresAttention: true, attentionReason: "finished" })), "marcha");
-  assert.equal(grupoDe(agente("d", { requiresAttention: true, attentionReason: "finished" })), "sinVer");
-  assert.equal(grupoDe(agente("e", { status: "error", requiresAttention: true, attentionReason: "error" })), "sinVer");
+test("Paseo's precedence: data beats error, error beats a running turn, a turn beats an unseen end", () => {
+  assert.equal(grupoDe(agente("a", { status: "running", pendingPermissions: [{}] })), "necesitaDatos");
+  assert.equal(grupoDe(agente("b", { attentionReason: "permission", requiresAttention: true })), "necesitaDatos");
+  assert.equal(grupoDe(agente("c", { status: "running", attentionReason: "error" })), "conError");
+  assert.equal(grupoDe(agente("d", { status: "running", requiresAttention: true, attentionReason: "finished" })), "enEjecucion");
+  assert.equal(grupoDe(agente("e", { requiresAttention: true, attentionReason: "finished" })), "paraRevisar");
+  assert.equal(grupoDe(agente("f", { status: "error", requiresAttention: true, attentionReason: "error" })), "conError");
 });
 
-test("an idle agent already seen, or one that failed and was seen, is in no group", () => {
-  assert.equal(grupoDe(agente("a")), null);
-  assert.equal(grupoDe(agente("b", { status: "error" })), null);
-  assert.equal(grupoDe(agente("c", { status: "initializing" })), null);
+test("every agent lands in a group: one already seen is Terminado", () => {
+  assert.equal(grupoDe(agente("a")), "terminado");
+  assert.equal(grupoDe(agente("b", { status: "error" })), "conError");
+  assert.equal(grupoDe(agente("c", { status: "initializing" })), "terminado");
 });
 
 test("groups come in order, empty ones are left out, and the newest is first", () => {
@@ -31,27 +32,34 @@ test("groups come in order, empty ones are left out, and the newest is first", (
     agente("viejo", { status: "running", createdAt: "2026-10-13T09:00:00.000Z" }),
     agente("acabado", { requiresAttention: true, attentionTimestamp: "2026-10-13T11:00:00.000Z" }),
     agente("nuevo", { status: "running", createdAt: "2026-10-13T12:00:00.000Z" }),
+    agente("roto", { status: "error" }),
     agente("pregunta", { pendingPermissions: [{}], attentionTimestamp: "2026-10-13T08:00:00.000Z" }),
   ]);
   assert.deepEqual(
     grupos.map(({ titulo, agentes }) => [titulo, agentes.map(({ id }) => id)]),
     [
-      ["Te preguntan", ["pregunta"]],
-      ["En marcha", ["nuevo", "viejo"]],
-      ["Sin ver", ["acabado"]],
+      ["Necesita datos", ["pregunta"]],
+      ["Con error", ["roto"]],
+      ["Para revisar", ["acabado"]],
+      ["En ejecución", ["nuevo", "viejo"]],
+      ["Terminado", ["visto"]],
     ],
   );
 });
 
 test("a stored fold is read back, and a broken or foreign one reads as nothing folded", () => {
-  assert.deepEqual(leePlegado(JSON.stringify({ bloque: true, grupos: ["sinVer", "otro", "toString"], ocultos: ["prj_1", 7] })), {
+  assert.deepEqual(leePlegado(JSON.stringify({ bloque: true, grupos: ["paraRevisar", "otro", "toString"], ocultos: ["prj_1", 7] })), {
     bloque: true,
-    grupos: ["sinVer"],
+    grupos: ["paraRevisar"],
     ocultos: ["prj_1"],
   });
-  for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}']) {
-    assert.deepEqual(leePlegado(texto), { bloque: false, grupos: [], ocultos: [] });
+  // Nothing stored, or a save from before "Terminado" existed (no `ocultos`): it starts folded.
+  const plegadoVacio = { bloque: false, grupos: ["terminado"], ocultos: [] };
+  for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}', '{"bloque":false,"grupos":[]}']) {
+    assert.deepEqual(leePlegado(texto), plegadoVacio);
   }
+  // A save that knows "Terminado" respects the explicit choice, even if it is unfolded.
+  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"ocultos":[]}'), { bloque: false, grupos: [], ocultos: [] });
 });
 
 test("a project gets the letter and color of Paseo's workspace list", () => {
