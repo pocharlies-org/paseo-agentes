@@ -10,6 +10,8 @@ export interface Agente {
   readonly attentionTimestamp?: string | null;
   readonly workspaceId?: string;
   readonly labels?: Readonly<Record<string, string>>;
+  readonly persistence?: { readonly sessionId: string } | null;
+  readonly runtimeInfo?: { readonly sessionId: string | null };
 }
 
 // The same buckets and Spanish labels as Paseo's status view (`STATUS_BUCKET_ORDER` and `statusBucket` in its i18n).
@@ -64,7 +66,7 @@ export function raizDe<T extends Agente>(agente: T, porId: ReadonlyMap<string, T
  */
 export function agrupar<T extends Agente>(
   agentes: readonly T[],
-  conSubagentes: ReadonlySet<string> = new Set(),
+  conSubagentes: { has(agentId: string): boolean } = new Set(),
 ): { grupo: Grupo; titulo: string; agentes: T[] }[] {
   const porId = new Map(agentes.map((agente) => [agente.id, agente]));
   const enMarcha = new Set<string>();
@@ -83,6 +85,37 @@ export function agrupar<T extends Agente>(
         .sort((a, b) => desde(b).localeCompare(desde(a))),
     }))
     .filter((grupo) => grupo.agentes.length > 0);
+}
+
+/** What a row has running in the background: Claude subagents and Claude Code tasks (watchers). */
+export interface EnMarcha {
+  readonly subagentes: number;
+  readonly vigilantes: number;
+}
+
+/**
+ * Per row, what runs in the background for the agent and the children folded into it. `subagentes`: running Claude subagents
+ * per agent id; `vigilantes`: running Claude Code tasks per Claude session id.
+ */
+export function enMarchaPorFila<T extends Agente>(
+  agentes: readonly T[],
+  subagentes: ReadonlyMap<string, number>,
+  vigilantes: Readonly<Record<string, number>>,
+): Map<string, EnMarcha> {
+  const porId = new Map(agentes.map((agente) => [agente.id, agente]));
+  const porFila = new Map<string, EnMarcha>();
+  for (const agente of agentes) {
+    const raiz = raizDe(agente, porId);
+    const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+    const enMarcha = { subagentes: subagentes.get(agente.id) ?? 0, vigilantes: (sesion && vigilantes[sesion]) || 0 };
+    if (!raiz || enMarcha.subagentes + enMarcha.vigilantes === 0) continue;
+    const previo = porFila.get(raiz.id);
+    porFila.set(
+      raiz.id,
+      previo ? { subagentes: previo.subagentes + enMarcha.subagentes, vigilantes: previo.vigilantes + enMarcha.vigilantes } : enMarcha,
+    );
+  }
+  return porFila;
 }
 
 /** What is folded: the whole block, the groups closed inside it, and the projects filtered out. */

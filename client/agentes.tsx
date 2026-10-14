@@ -3,7 +3,19 @@ import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
 import { Fragment, useEffect, useMemo, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
-import { agrupar, insignias, leePlegado, type Agente, type Grupo, type Insignia, type Plegado, type Proyecto } from "../shared/agentes.ts";
+import {
+  agrupar,
+  enMarchaPorFila,
+  insignias,
+  leePlegado,
+  type Agente,
+  type EnMarcha,
+  type Grupo,
+  type Insignia,
+  type Plegado,
+  type Proyecto,
+} from "../shared/agentes.ts";
+import { vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
 
@@ -54,8 +66,10 @@ type Fila = Agente & { readonly projectId: string | null };
 
 interface Foto {
   readonly agentes: readonly Fila[];
-  /** The agents with a Claude subagent running: Paseo's status view counts them as running. */
-  readonly conSubagentes: ReadonlySet<string>;
+  /** Running Claude subagents per agent id: Paseo's status view counts their agents as running. */
+  readonly subagentes: ReadonlyMap<string, number>;
+  /** Running Claude Code tasks (watchers) per Claude session id, read on the daemon host. */
+  readonly vigilantes: Readonly<Record<string, number>>;
   readonly proyectos: readonly Proyecto[];
   readonly plegado: Plegado;
   readonly error: string | null;
@@ -69,7 +83,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], conSubagentes: new Set(), proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -81,6 +95,31 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     if (!lifetime.signal.aborted) publica({ error: error instanceof Error ? error.message : String(error) });
   };
 
+  // Watchers have no event: they start inside a turn and their end wakes the agent, so a change of agents is when to look again.
+  // At most one read every 3 s (a scan of /proc costs ~150 ms on the host).
+  let leyendo = false;
+  let otraVez = false;
+  const leeVigilantes = () => {
+    if (lifetime.signal.aborted) return;
+    if (leyendo) {
+      otraVez = true;
+      return;
+    }
+    leyendo = true;
+    void client
+      .rpc(vigilantesList, {})
+      .then(({ sesiones }) => publica({ vigilantes: sesiones }), falla)
+      .finally(() =>
+        setTimeout(() => {
+          leyendo = false;
+          if (otraVez) {
+            otraVez = false;
+            leeVigilantes();
+          }
+        }, 3000),
+      );
+  };
+
   void client.paseo.agents
     .list({ subscribe: {}, signal: lifetime.signal })
     .then(({ subscription }) => {
@@ -89,6 +128,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           filas.clear();
           for (const { agent, project } of entries) filas.set(agent.id, { ...agent, projectId: project.projectKey });
           muestraFilas();
+          leeVigilantes();
         },
         update: (message) => {
           if (message.type !== "agent_update") return;
@@ -99,6 +139,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             filas.set(update.agent.id, { ...update.agent, projectId });
           }
           muestraFilas();
+          leeVigilantes();
         },
       });
     })
@@ -113,7 +154,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   // shortcut: the event stream has no snapshot, so a subagent already running when this loads shows from its next action or
   // its end; upgrade if the plugin API gets a subagent list.
   const subagentes = new Map<string, string>();
-  const muestraSubagentes = () => publica({ conSubagentes: new Set(subagentes.values()) });
+  const muestraSubagentes = () => {
+    const porAgente = new Map<string, number>();
+    for (const padre of subagentes.values()) porAgente.set(padre, (porAgente.get(padre) ?? 0) + 1);
+    publica({ subagentes: porAgente });
+  };
   client.paseo.observeEvents(["agent.provider_subagents.update"], { signal: lifetime.signal }).subscribe({
     // Delivered again after a reconnect: whatever ended meanwhile must not stay running.
     snapshot: () => {
@@ -145,10 +190,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   };
 
   function AgentesItem({ theme, host, openScreen }: PluginSidebarItemProps) {
-    const { agentes, conSubagentes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
+    const { agentes, subagentes, vigilantes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
-    const todos = useMemo(() => agrupar(agentes, conSubagentes), [agentes, conSubagentes]);
+    const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
+    const enMarcha = useMemo(() => enMarchaPorFila(agentes, subagentes, vigilantes), [agentes, subagentes, vigilantes]);
     // The filter is per project, after grouping so it hides rows and never a parent its children depend on; an agent whose
     // project is unknown is never hidden by it.
     const grupos = useMemo(
@@ -246,6 +292,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                             icon={insignia ? dibujo(insignia) : ICONOS[grupo]}
                             label={agente.title ?? "Sin título"}
                             onPress={() => openScreen({ screenId: "abrir", params: { agentId: agente.id } })}
+                            trailing={<Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />}
                           />
                         );
                       })
@@ -265,6 +312,29 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     lifetime.abort();
     sueltaProyectos();
   };
+}
+
+// What a row runs in the background, beside its title: subagents (Bot) and watchers (Eye), each with its count.
+function Marcas({ enMarcha, color }: { enMarcha: EnMarcha | undefined; color: string }) {
+  if (!enMarcha) return null;
+  const { subagentes, vigilantes } = enMarcha;
+  const marca = (icono: string, numero: number) =>
+    numero > 0 ? (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+        <Icon name={icono} size={12} color={color} />
+        <Text style={{ color, fontSize: 11 }}>{numero}</Text>
+      </View>
+    ) : null;
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${subagentes} subagentes y ${vigilantes} watchers en marcha`}
+      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8 }}
+    >
+      {marca("Bot", subagentes)}
+      {marca("Eye", vigilantes)}
+    </View>
+  );
 }
 
 // shortcut: Paseo 0.11 gives `navigation.openAgent` to screens and panels, not to sidebar items, so a row opens this screen and the

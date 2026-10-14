@@ -48,13 +48,28 @@ El estado de cada fila sigue las reglas con que el daemon calcula la vista de es
 La vista de abajo agrupa workspaces y este bloque agentes: un workspace sale «En ejecución» si cualquiera de sus agentes
 corre, aunque otro de ellos esté «Para revisar».
 
+## Subagentes y watchers de cada agente
+
+A la derecha de cada fila, lo que el agente tiene en marcha en segundo plano, con su número: un robot por subagentes de
+Claude y un ojo por watchers (tareas de Claude Code: un `Bash` en segundo plano, un `Monitor`). Cuenta también lo de los
+hijos que se pliegan en esa fila. No cambia el grupo: un watcher no hace «En ejecución», igual que en la vista de Paseo.
+
+- Subagentes: el evento `agent.provider_subagents.update` de Paseo.
+- Watchers: Paseo no los guarda. Claude Code escribe la salida de cada tarea en
+  `<tmp>/claude-<uid>/<cwd>/<sessionId>/tasks/<id>.output` y el proceso que la ejecuta tiene ese fichero abierto hasta que
+  acaba. La parte de servidor del plugin (RPC `vigilantes.list`) recorre `/proc` en el host del daemon y cuenta esos
+  ficheros abiertos por sesión (~150 ms); el `sessionId` del agente es la carpeta. El cliente lo pide cuando cambian los
+  agentes (un watcher nace dentro de un turno y su final despierta al agente), como mucho una vez cada 3 s.
+- Límite: mientras el agente está en turno, el comando que ejecuta en primer plano cuenta también (usa el mismo fichero).
+  Solo se ven procesos del usuario del daemon.
+
 ## Qué lee y envía
 
 El directorio de agentes del daemon, con la suscripción del SDK (`paseo.agents.list({ subscribe: {} })`): una foto
 al empezar y un `agent_update` por cambio, sin sondeo. Y la lista de proyectos (`paseo.projects.list()`), que relee entera
 con cada `project.update` para el icono de las filas. Y el evento de subagentes de Claude
-(`observeEvents(["agent.provider_subagents.update"])`), del que solo usa altas, cambios de estado y bajas. No tiene parte de servidor ni RPCs, no escribe en el daemon (solo guarda lo plegado en el cliente) y no llama a
-nadie fuera del daemon.
+(`observeEvents(["agent.provider_subagents.update"])`), del que solo usa altas, cambios de estado y bajas. Su parte de servidor solo lee `/proc` del host del daemon (los ficheros que tiene abiertos cada proceso, para los
+watchers). No escribe en el daemon (lo plegado se guarda en el cliente) y no llama a nadie fuera del daemon.
 
 ## Instalación
 
@@ -70,5 +85,6 @@ Comprueba antes `paseo --version` contra `requirements.paseo` del manifiesto: fu
 
 ## Pruebas
 
-`npm ci --ignore-scripts && npm run typecheck && npm test`. Los tests cubren la clasificación, el orden, el
+`npm ci --ignore-scripts && npm run typecheck && npm test`. Los tests cubren la clasificación, el orden, lo que corre en segundo plano por fila (y un proceso real que
+abre un fichero de tareas falso), el
 icono de cada proyecto y la lectura de lo plegado (`shared/agentes.ts`); la suscripción y la navegación se comprueban en el vivo.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, grupoDe, insignias, leePlegado, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, grupoDe, insignias, leePlegado, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -96,4 +96,12 @@ test("rows and groups follow Paseo's workspace status: children and Claude subag
   assert.deepEqual(filas([padre], new Set(["padre"])), [["En ejecución", ["padre"]]]);
   assert.deepEqual(filas([padre, hijo("h")], new Set(["h"])), [["En ejecución", ["padre"]]]);
   assert.deepEqual(filas([{ ...padre, pendingPermissions: [{}] }], new Set(["padre"])), [["Necesita datos", ["padre"]]]);
+});
+
+test("each row adds up the subagents and watchers of the agent and of the children folded into it", () => {
+  const padre = agente("padre", { workspaceId: "w1", persistence: { sessionId: "s-padre" } });
+  const hijo = agente("hijo", { workspaceId: "w1", labels: { "paseo.parent-agent-id": "padre" }, runtimeInfo: { sessionId: "s-hijo" } });
+  const otro = agente("otro", { workspaceId: "w2", persistence: { sessionId: "s-otro" } });
+  const porFila = enMarchaPorFila([padre, hijo, otro], new Map([["padre", 2], ["hijo", 1]]), { "s-padre": 1, "s-hijo": 2, "s-ajena": 5 });
+  assert.deepEqual(Object.fromEntries(porFila), { padre: { subagentes: 3, vigilantes: 3 } });
 });
