@@ -39,11 +39,12 @@ Lo elige el ajuste del plugin «Dónde se ve» (Ajustes de Paseo → plugin «Ag
 clientes:
 
 - **Izquierda** (por defecto): en la cabecera de la barra lateral.
-- **Derecha**: como panel «Agentes» del Explorer, la columna de la derecha junto a Archivos y Cambios, con el mismo
-  contenido; ahí la fila abre el agente directamente. El Explorer solo existe con un workspace abierto.
+- **Derecha**: el bloque sale de la barra lateral. Se abre como panel «Agentes» con el `+` del Explorer (la columna de la
+  derecha, junto a Archivos y Cambios), con el mismo contenido; ahí la fila abre el agente directamente. El Explorer solo
+  existe con un workspace abierto.
 
-El panel se pone o se quita al cambiar el ajuste, sin recargar: lo lee la parte de servidor al cargar (`lado.get`) y lo
-sigue cualquier parte del plugin que esté montada.
+El panel está disponible en los dos casos: si se quitara al volver a la izquierda, su pestaña abierta se quedaría como
+«This plugin panel is unavailable». El cambio se ve sin recargar.
 
 ## Las mismas reglas que la vista de estado
 

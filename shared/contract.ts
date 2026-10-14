@@ -7,10 +7,3 @@ export const vigilantesList = defineRpc({
   input: z.object({}).strict(),
   output: z.object({ sesiones: z.record(z.string(), z.number().int().nonnegative()) }),
 });
-
-/** The side the block shows on, read on the server: a client needs it before any of its components mounts. */
-export const ladoGet = defineRpc({
-  name: "lado.get",
-  input: z.object({}).strict(),
-  output: z.object({ lado: z.enum(["izquierda", "derecha"]) }),
-});
