@@ -357,7 +357,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   client.addScreen({ id: "abrir", title: "Agente", Component: AbrirAgente });
   client.addSidebarHeaderItem({ id: "agentes", title: "Agentes", Component: AgentesItem });
   client.addWorkspacePanel({ id: "agentes", title: "Agentes", icon: "Bot", context: "workspace", locations: ["explorer"], Component: PanelAgentes });
-  client.addSettingsScreen({ id: "ajustes", title: "Agentes por estado", icon: "Settings", Component: AjustesAgentes });
+  client.addSettingsScreen({ id: "ajustes", title: "Ajustes", icon: "Settings", Component: AjustesAgentes });
   return () => {
     lifetime.abort();
     sueltaProyectos();

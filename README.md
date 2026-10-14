@@ -35,7 +35,7 @@ navegación de workspaces de Paseo vuelve al host sin dejarla en el historial.
 
 ## Dónde se ve
 
-Lo elige el ajuste del plugin «Dónde se ve» (Ajustes de Paseo → plugin «Agentes por estado»), uno por host para todos sus
+Lo elige el ajuste del plugin «Dónde se ve» (Ajustes de Paseo → Plugins → `⋯` de paseo-agentes → «Ajustes»), uno por host para todos sus
 clientes:
 
 - **Izquierda** (por defecto): en la cabecera de la barra lateral.
