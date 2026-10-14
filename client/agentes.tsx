@@ -24,7 +24,7 @@ import {
   type Proyecto,
 } from "../shared/agentes.ts";
 import { ajustesAgentes, type Lado } from "../shared/ajustes.ts";
-import { ladoGet, vigilantesList } from "../shared/contract.ts";
+import { vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
 
@@ -198,49 +198,22 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     almacen?.setItem(CLAVE_PLEGADO, JSON.stringify(plegado));
   };
 
-  // The side the block shows on. The Explorer panel exists only while it is "derecha"; whatever part of the plugin is mounted
-  // follows a change of the setting, and the server's answer places it at load, before anything mounts.
-  let quitaPanel: (() => void) | null = null;
-  const colocaPanel = (lado: Lado) => {
-    if (lado === "derecha" && !quitaPanel) {
-      quitaPanel = client.addWorkspacePanel({
-        id: "agentes",
-        title: "Agentes",
-        icon: "Bot",
-        context: "workspace",
-        locations: ["explorer"],
-        Component: PanelAgentes,
-      });
-    } else if (lado === "izquierda" && quitaPanel) {
-      quitaPanel();
-      quitaPanel = null;
-    }
-  };
-  void client.rpc(ladoGet, {}).then(({ lado }) => colocaPanel(lado), falla);
-  const useLado = () => {
-    const ajustes = useSettings(ajustesAgentes);
-    const lado = ajustes.status === "ready" ? ajustes.values.lado : null;
-    useEffect(() => {
-      if (lado) colocaPanel(lado);
-    }, [lado]);
-    return { ajustes, lado };
-  };
-
+  // The setting only decides whether the sidebar shows the block. The Explorer panel stays registered on either side: a panel
+  // removed while its tab is open leaves a dead «This plugin panel is unavailable» tab behind.
   function AgentesItem({ theme, host, openScreen }: PluginSidebarItemProps) {
-    const { lado } = useLado();
-    if (lado === "derecha") return null;
+    const ajustes = useSettings(ajustesAgentes);
+    if (ajustes.status === "ready" && ajustes.values.lado === "derecha") return null;
     const abre = (agentId: string) => openScreen({ screenId: "abrir", params: { agentId } });
     return <Bloque theme={theme} host={host} abre={abre} enPanel={false} />;
   }
 
   // Panels get navigation, so a row opens its agent directly.
   function PanelAgentes({ theme, host, navigation }: PluginWorkspacePanelProps) {
-    useLado();
     return <Bloque theme={theme} host={host} abre={(agentId) => navigation?.openAgent({ agentId })} enPanel />;
   }
 
   function AjustesAgentes({ theme }: PluginSurfaceProps) {
-    const { ajustes, lado } = useLado();
+    const ajustes = useSettings(ajustesAgentes);
     if (ajustes.status === "loading") return <Text style={{ color: theme.colors.foregroundMuted }}>Cargando…</Text>;
     if (ajustes.status === "error") return <Text style={{ color: theme.colors.statusDanger }}>No se pudieron leer los ajustes</Text>;
     const { revision } = ajustes;
@@ -249,8 +222,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         <SettingsCard>
           <SettingsSelect
             label="Dónde se ve"
-            hint="A la izquierda, en la cabecera de la barra lateral; a la derecha, como panel del Explorer, junto a Archivos y Cambios"
-            value={lado ?? "izquierda"}
+            hint="A la derecha, el bloque sale de la barra lateral: ábrelo como panel «Agentes» con el + del Explorer, junto a Archivos y Cambios"
+            value={ajustes.status === "ready" ? ajustes.values.lado : "izquierda"}
             options={LADOS}
             disabled={ajustes.saving}
             onValueChange={(valor) => void ajustes.save({ lado: valor as Lado }, revision)}
@@ -383,11 +356,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
 
   client.addScreen({ id: "abrir", title: "Agente", Component: AbrirAgente });
   client.addSidebarHeaderItem({ id: "agentes", title: "Agentes", Component: AgentesItem });
+  client.addWorkspacePanel({ id: "agentes", title: "Agentes", icon: "Bot", context: "workspace", locations: ["explorer"], Component: PanelAgentes });
   client.addSettingsScreen({ id: "ajustes", title: "Agentes por estado", icon: "Settings", Component: AjustesAgentes });
   return () => {
     lifetime.abort();
     sueltaProyectos();
-    quitaPanel?.();
   };
 }
 
