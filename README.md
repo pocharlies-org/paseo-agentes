@@ -33,6 +33,18 @@ Pulsar una fila abre el agente en su workspace. Paseo 0.11 solo da `navigation.o
 los elementos de la barra lateral: la fila abre la pantalla `abrir` del plugin, que abre el agente al montarse, y la
 navegación de workspaces de Paseo vuelve al host sin dejarla en el historial.
 
+## Dónde se ve
+
+Lo elige el ajuste del plugin «Dónde se ve» (Ajustes de Paseo → plugin «Agentes por estado»), uno por host para todos sus
+clientes:
+
+- **Izquierda** (por defecto): en la cabecera de la barra lateral.
+- **Derecha**: como panel «Agentes» del Explorer, la columna de la derecha junto a Archivos y Cambios, con el mismo
+  contenido; ahí la fila abre el agente directamente. El Explorer solo existe con un workspace abierto.
+
+El panel se pone o se quita al cambiar el ajuste, sin recargar: lo lee la parte de servidor al cargar (`lado.get`) y lo
+sigue cualquier parte del plugin que esté montada.
+
 ## Las mismas reglas que la vista de estado
 
 El estado de cada fila sigue las reglas con que el daemon calcula la vista de estado de los workspaces
@@ -69,7 +81,7 @@ El directorio de agentes del daemon, con la suscripción del SDK (`paseo.agents.
 al empezar y un `agent_update` por cambio, sin sondeo. Y la lista de proyectos (`paseo.projects.list()`), que relee entera
 con cada `project.update` para el icono de las filas. Y el evento de subagentes de Claude
 (`observeEvents(["agent.provider_subagents.update"])`), del que solo usa altas, cambios de estado y bajas. Su parte de servidor solo lee `/proc` del host del daemon (los ficheros que tiene abiertos cada proceso, para los
-watchers). No escribe en el daemon (lo plegado se guarda en el cliente) y no llama a nadie fuera del daemon.
+watchers). No escribe en el daemon más que su documento de ajustes (`paseo-agentes`, el lado); lo plegado se guarda en el cliente y no llama a nadie fuera del daemon.
 
 ## Instalación
 

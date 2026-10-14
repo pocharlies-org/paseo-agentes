@@ -1,6 +1,14 @@
-import type { PluginClientContext, PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import type {
+  PluginClientContext,
+  PluginHostProps,
+  PluginScreenProps,
+  PluginSidebarItemProps,
+  PluginSurfaceProps,
+  PluginWorkspacePanelProps,
+} from "@getpaseo/plugin/client";
+import { useSettings } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
+import { SettingsCard, SettingsSection, SettingsSelect, SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
 import { Fragment, useEffect, useMemo, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import {
@@ -15,7 +23,8 @@ import {
   type Plegado,
   type Proyecto,
 } from "../shared/agentes.ts";
-import { vigilantesList } from "../shared/contract.ts";
+import { ajustesAgentes, type Lado } from "../shared/ajustes.ts";
+import { ladoGet, vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
 
@@ -189,7 +198,70 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     almacen?.setItem(CLAVE_PLEGADO, JSON.stringify(plegado));
   };
 
+  // The side the block shows on. The Explorer panel exists only while it is "derecha"; whatever part of the plugin is mounted
+  // follows a change of the setting, and the server's answer places it at load, before anything mounts.
+  let quitaPanel: (() => void) | null = null;
+  const colocaPanel = (lado: Lado) => {
+    if (lado === "derecha" && !quitaPanel) {
+      quitaPanel = client.addWorkspacePanel({
+        id: "agentes",
+        title: "Agentes",
+        icon: "Bot",
+        context: "workspace",
+        locations: ["explorer"],
+        Component: PanelAgentes,
+      });
+    } else if (lado === "izquierda" && quitaPanel) {
+      quitaPanel();
+      quitaPanel = null;
+    }
+  };
+  void client.rpc(ladoGet, {}).then(({ lado }) => colocaPanel(lado), falla);
+  const useLado = () => {
+    const ajustes = useSettings(ajustesAgentes);
+    const lado = ajustes.status === "ready" ? ajustes.values.lado : null;
+    useEffect(() => {
+      if (lado) colocaPanel(lado);
+    }, [lado]);
+    return { ajustes, lado };
+  };
+
   function AgentesItem({ theme, host, openScreen }: PluginSidebarItemProps) {
+    const { lado } = useLado();
+    if (lado === "derecha") return null;
+    const abre = (agentId: string) => openScreen({ screenId: "abrir", params: { agentId } });
+    return <Bloque theme={theme} host={host} abre={abre} enPanel={false} />;
+  }
+
+  // Panels get navigation, so a row opens its agent directly.
+  function PanelAgentes({ theme, host, navigation }: PluginWorkspacePanelProps) {
+    useLado();
+    return <Bloque theme={theme} host={host} abre={(agentId) => navigation?.openAgent({ agentId })} enPanel />;
+  }
+
+  function AjustesAgentes({ theme }: PluginSurfaceProps) {
+    const { ajustes, lado } = useLado();
+    if (ajustes.status === "loading") return <Text style={{ color: theme.colors.foregroundMuted }}>Cargando…</Text>;
+    if (ajustes.status === "error") return <Text style={{ color: theme.colors.statusDanger }}>No se pudieron leer los ajustes</Text>;
+    const { revision } = ajustes;
+    return (
+      <SettingsSection title="Agentes por estado">
+        <SettingsCard>
+          <SettingsSelect
+            label="Dónde se ve"
+            hint="A la izquierda, en la cabecera de la barra lateral; a la derecha, como panel del Explorer, junto a Archivos y Cambios"
+            value={lado ?? "izquierda"}
+            options={LADOS}
+            disabled={ajustes.saving}
+            onValueChange={(valor) => void ajustes.save({ lado: valor as Lado }, revision)}
+          />
+        </SettingsCard>
+        {ajustes.saveError ? <Text style={{ color: theme.colors.statusDanger }}>El host no aceptó el cambio</Text> : null}
+      </SettingsSection>
+    );
+  }
+
+  function Bloque({ theme, host, abre, enPanel }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean }) {
     const { agentes, subagentes, vigilantes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
@@ -212,7 +284,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       }
       return [...conteo].sort(([, a], [, b]) => b - a);
     }, [todos]);
-    if (!error && todos.length === 0) return null;
+    if (!error && todos.length === 0) {
+      return enPanel ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>Ningún agente.</Text> : null;
+    }
     const tenue = theme.colors.foregroundMuted;
     const texto = { color: tenue, fontSize: 11 };
     // Left edge of the rows' icons: the row's padding plus its button's.
@@ -220,8 +294,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: 4 } as const;
     const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
     return (
-      <>
-        <SidebarSeparator />
+      <View style={enPanel ? { flex: 1, paddingTop: 8 } : undefined}>
+        {enPanel ? null : <SidebarSeparator />}
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: !plegado.bloque }}
@@ -242,7 +316,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         </Pressable>
         {error ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
         {plegado.bloque ? null : (
-          <ScrollView style={{ maxHeight: Math.round(height * 0.6) }}>
+          <ScrollView style={enPanel ? { flex: 1 } : { maxHeight: Math.round(height * 0.6) }}>
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingLeft: 16, paddingTop: 4, paddingBottom: 4 }}>
               {fichas.map(([projectId, numero]) => {
                 const insignia = iconos.get(projectId);
@@ -285,15 +359,16 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   {abierto
                     ? agentes.map((agente) => {
                         const insignia = agente.projectId ? iconos.get(agente.projectId) : undefined;
-                        return (
-                          <SidebarRow
-                            key={agente.id}
-                            id={agente.id}
-                            icon={insignia ? dibujo(insignia) : ICONOS[grupo]}
-                            label={agente.title ?? "Sin título"}
-                            onPress={() => openScreen({ screenId: "abrir", params: { agentId: agente.id } })}
-                            trailing={<Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />}
-                          />
+                        const fila = {
+                          icon: insignia ? dibujo(insignia) : ICONOS[grupo],
+                          label: agente.title ?? "Sin título",
+                          onPress: () => abre(agente.id),
+                          trailing: <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />,
+                        };
+                        return enPanel ? (
+                          <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} />
+                        ) : (
+                          <SidebarRow key={agente.id} id={agente.id} {...fila} />
                         );
                       })
                     : null}
@@ -302,16 +377,41 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             })}
           </ScrollView>
         )}
-      </>
+      </View>
     );
   }
 
   client.addScreen({ id: "abrir", title: "Agente", Component: AbrirAgente });
   client.addSidebarHeaderItem({ id: "agentes", title: "Agentes", Component: AgentesItem });
+  client.addSettingsScreen({ id: "ajustes", title: "Agentes por estado", icon: "Settings", Component: AjustesAgentes });
   return () => {
     lifetime.abort();
     sueltaProyectos();
+    quitaPanel?.();
   };
+}
+
+const LADOS = [
+  { label: "Izquierda: barra lateral", value: "izquierda" },
+  { label: "Derecha: panel del Explorer", value: "derecha" },
+];
+
+// SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
+function FilaPanel({ icon: Icono, label, onPress, trailing, color }: { icon: Dibujo; label: string; onPress(): void; trailing: React.ReactNode; color: string }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
+    >
+      <Icono size={14} color={color} />
+      <Text style={{ flex: 1, color, fontSize: 13 }} numberOfLines={2}>
+        {label}
+      </Text>
+      {trailing}
+    </Pressable>
+  );
 }
 
 // What a row runs in the background, beside its title: subagents (Bot) and watchers (Eye), each with its count.
