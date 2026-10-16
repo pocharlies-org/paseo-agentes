@@ -6,6 +6,6 @@ import { vigilantes } from "./server/vigilantes.ts";
 // Paseo refuses a contribution that returns no cleanup; this one keeps nothing to release.
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(ajustesAgentes);
-  server.handle(vigilantesList, () => ({ sesiones: vigilantes() }));
+  server.handle(vigilantesList, async () => ({ sesiones: await vigilantes() }));
   return () => {};
 }

@@ -4,7 +4,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { vigilantes } from "../server/vigilantes.ts";
+import { rutasDeLsof, vigilantes } from "../server/vigilantes.ts";
 
 test("a task file held open by a live process counts for its session, and stops counting when the process ends", async () => {
   const raiz = mkdtempSync(join(tmpdir(), "vigilantes-"));
@@ -15,12 +15,31 @@ test("a task file held open by a live process counts for its session, and stops 
   const hijo = spawn("sleep", ["30"], { stdio: ["ignore", fd, "ignore"] });
   closeSync(fd);
   try {
-    assert.equal(vigilantes()[sesion], 1);
+    assert.equal((await vigilantes())[sesion], 1);
   } finally {
     const fin = new Promise((ok) => hijo.once("exit", ok));
     hijo.kill();
     await fin;
     rmSync(raiz, { recursive: true, force: true });
   }
-  assert.equal(vigilantes()[sesion], undefined);
+  assert.equal((await vigilantes())[sesion], undefined);
+});
+
+test("a missing /proc falls back without throwing", async () => {
+  const resultado = await vigilantes({ proc: "/no/such/proc" });
+  assert.equal(typeof resultado, "object");
+});
+
+test("a missing or failing lsof gives {} and never throws", async () => {
+  assert.deepEqual(await vigilantes({ proc: "/no/such/proc", lsof: "/no/such/lsof" }), {});
+  assert.deepEqual(await vigilantes({ proc: "/no/such/proc", lsof: "false" }), {});
+  assert.deepEqual(await vigilantes({ proc: "/no/such/proc", uid: undefined }), {});
+});
+
+test("lsof -F n output is parsed to paths, ignoring pid lines", () => {
+  const sesion = "0f0e0d0c-0b0a-4908-8706-050403020100";
+  const salida = `p101\nn/dev/null\nn/private/tmp/claude-501/-Users-x/${sesion}/tasks/b1.output\np102\nn/private/tmp/claude-501/-Users-x/${sesion}/tasks/b1.output\nn->0x1234\n`;
+  const rutas = rutasDeLsof(salida);
+  assert.equal(rutas.length, 4);
+  assert.equal(rutas[1], `/private/tmp/claude-501/-Users-x/${sesion}/tasks/b1.output`);
 });

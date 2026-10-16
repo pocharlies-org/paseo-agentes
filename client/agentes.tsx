@@ -105,7 +105,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   };
 
   // Watchers have no event: they start inside a turn and their end wakes the agent, so a change of agents is when to look again.
-  // At most one read every 3 s (a scan of /proc costs ~150 ms on the host).
+  // At most one read every 3 s (the host scan, /proc or lsof, costs ~150 ms to ~1 s and runs async).
   let leyendo = false;
   let otraVez = false;
   const leeVigilantes = () => {

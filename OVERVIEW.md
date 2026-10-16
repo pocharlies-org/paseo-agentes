@@ -53,8 +53,9 @@ So the block and Paseo's status view never disagree, the plugin mirrors the daem
 On the right of each row, two badges with their counts: a robot for running Claude subagents and an eye for running
 watchers (background `Bash` / `Monitor` tasks of that session), children's marks summed into the row. This is the
 part Paseo does not track: Claude Code keeps each task's output file open while it runs, so the plugin's server part
-scans `/proc` on the daemon host once per agent-list change (at most every 3 s, ~150 ms) and counts those open files
-per session. **Watcher counts need a Linux daemon** (they read `/proc`); on other systems the badges only show
+lists the daemon user's open files once per agent-list change (at most every 3 s) and counts those task files
+per session: it scans `/proc` on Linux (~150 ms) and runs `lsof` asynchronously on macOS and other Unix without `/proc`
+(5 s timeout). Where neither works (Windows, `lsof` missing or failing) the watcher counts are zero and the badges only show
 subagents. A foreground command inside a live turn also holds the file, so it counts while the agent is running —
 which is already visible by its group.
 
@@ -62,7 +63,7 @@ which is already visible by its group.
 
 Everything stays inside your Paseo daemon. The client subscribes to the agent list and the project list through the
 SDK (a snapshot plus one event per change, no polling) and listens to the subagent event. The server part only reads
-which files each process of the daemon's user has open under `/proc`. It writes nothing to the daemon except its own
+which files each process of the daemon's user has open (`/proc`, or `lsof` restricted to that user). It writes nothing to the daemon except its own
 settings document (the side), and calls nothing outside the daemon. Folding and hidden projects live in the
 client's `localStorage`.
 
