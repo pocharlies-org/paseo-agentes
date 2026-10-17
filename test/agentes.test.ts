@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, grupoDe, insignias, leePlegado, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, grupoDe, hace, insignias, leePlegado, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -45,6 +45,19 @@ test("groups come in order, empty ones are left out, and the newest is first", (
       ["Terminado", ["visto"]],
     ],
   );
+});
+
+test("a turn end reads as one word, and nothing reads as nothing", () => {
+  const ahora = Date.parse("2026-10-13T12:00:00.000Z");
+  assert.equal(hace("2026-10-13T11:59:30.000Z", ahora), "ahora");
+  assert.equal(hace("2026-10-13T11:55:00.000Z", ahora), "5m");
+  assert.equal(hace("2026-10-13T09:00:00.000Z", ahora), "3h");
+  assert.equal(hace("2026-10-10T12:00:00.000Z", ahora), "3d");
+  assert.equal(hace(null, ahora), null);
+  assert.equal(hace(undefined, ahora), null);
+  assert.equal(hace("no es fecha", ahora), null);
+  // A client clock behind the daemon's would say a future time: say nothing.
+  assert.equal(hace("2026-10-13T13:00:00.000Z", ahora), null);
 });
 
 test("a stored fold is read back, and a broken or foreign one reads as nothing folded", () => {

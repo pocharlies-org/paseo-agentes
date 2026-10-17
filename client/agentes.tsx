@@ -9,11 +9,12 @@ import type {
 import { useSettings } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SettingsCard, SettingsSection, SettingsSelect, SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
-import { Fragment, useEffect, useMemo, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import {
   agrupar,
   enMarchaPorFila,
+  hace,
   insignias,
   leePlegado,
   type Agente,
@@ -104,6 +105,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     if (!lifetime.signal.aborted) publica({ error: error instanceof Error ? error.message : String(error) });
   };
 
+  // When each agent stopped talking: Paseo's attention timestamp while the notice stands, plus the running→idle moment
+  // caught here, which survives opening the agent (Paseo clears the notice as soon as you see it).
+  // shortcut: on load an agent already read has no time to show — the daemon keeps none; upgrade when the protocol carries one.
+  const terminos = new Map<string, string>();
+  const estados = new Map<string, string>();
+  const apunta = (agente: Agente) => {
+    if (agente.attentionTimestamp) terminos.set(agente.id, agente.attentionTimestamp);
+    if (estados.get(agente.id) === "running" && agente.status !== "running") terminos.set(agente.id, new Date().toISOString());
+    estados.set(agente.id, agente.status);
+  };
+
   // Watchers have no event: they start inside a turn and their end wakes the agent, so a change of agents is when to look again.
   // At most one read every 3 s (the host scan, /proc or lsof, costs ~150 ms to ~1 s and runs async).
   let leyendo = false;
@@ -135,17 +147,24 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       subscription.subscribe({
         snapshot: ({ entries }) => {
           filas.clear();
-          for (const { agent, project } of entries) filas.set(agent.id, { ...agent, projectId: project.projectKey });
+          for (const { agent, project } of entries) {
+            filas.set(agent.id, { ...agent, projectId: project.projectKey });
+            apunta(agent);
+          }
           muestraFilas();
           leeVigilantes();
         },
         update: (message) => {
           if (message.type !== "agent_update") return;
           const update = message.payload;
-          if (update.kind === "remove") filas.delete(update.agentId);
-          else {
+          if (update.kind === "remove") {
+            filas.delete(update.agentId);
+            terminos.delete(update.agentId);
+            estados.delete(update.agentId);
+          } else {
             const projectId = update.project?.projectKey ?? filas.get(update.agent.id)?.projectId ?? null;
             filas.set(update.agent.id, { ...update.agent, projectId });
+            apunta(update.agent);
           }
           muestraFilas();
           leeVigilantes();
@@ -240,6 +259,12 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const { height } = useWindowDimensions();
     const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
     const enMarcha = useMemo(() => enMarchaPorFila(agentes, subagentes, vigilantes), [agentes, subagentes, vigilantes]);
+    // A relative time goes stale while nothing else moves: wake the block once a minute.
+    const [, despierta] = useState(0);
+    useEffect(() => {
+      const id = setInterval(() => despierta((numero) => numero + 1), 60_000);
+      return () => void clearInterval(id);
+    }, []);
     // The filter is per project, after grouping so it hides rows and never a parent its children depend on; an agent whose
     // project is unknown is never hidden by it.
     const grupos = useMemo(
@@ -332,11 +357,18 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   {abierto
                     ? agentes.map((agente) => {
                         const insignia = agente.projectId ? iconos.get(agente.projectId) : undefined;
+                        // How long ago the turn ended, at the end of the line; a running agent has no finished turn to show.
+                        const tiempo = grupo === "enEjecucion" ? null : hace(terminos.get(agente.id), Date.now());
                         const fila = {
                           icon: insignia ? dibujo(insignia) : ICONOS[grupo],
                           label: agente.title ?? "Sin título",
                           onPress: () => abre(agente.id),
-                          trailing: <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />,
+                          trailing: (
+                            <View style={{ flexDirection: "row", alignItems: "center" }}>
+                              <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+                              {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
+                            </View>
+                          ),
                         };
                         return enPanel ? (
                           <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} />
