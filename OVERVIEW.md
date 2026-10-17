@@ -23,7 +23,10 @@ Empty groups are not rendered; with nothing pending the block takes no space. In
 timestamp that does not change while the agent emits — rows do not jump under the pointer.
 
 Each row carries its project's icon, painted the way Paseo's workspace list paints it (initial on its color, same
-palette and same key). The "Agentes" header folds and unfolds the whole block — folded, it leaves a single line with
+palette and same key). At the end of every row that is not running sits how long ago the agent finished speaking
+(«5m», «2h», «3d»): Paseo's attention time while the notice stands, and the running→idle moment caught live after
+that, so it survives opening the agent. On load, an agent already read shows nothing until its next turn ends —
+the daemon keeps no finished-at time. The "Agentes" header folds and unfolds the whole block — folded, it leaves a single line with
 one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
 only your interactive sessions, or only Hermes. Folding and hidden projects persist per client.
 

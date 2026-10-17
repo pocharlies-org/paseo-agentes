@@ -118,6 +118,19 @@ export function enMarchaPorFila<T extends Agente>(
   return porFila;
 }
 
+/** How long ago `desde` was, in one word beside the row: «ahora» under a minute, then «5m», «2h», «3d». */
+export function hace(desde: string | null | undefined, ahora: number): string | null {
+  const ms = desde ? ahora - Date.parse(desde) : NaN;
+  // No time, or the client clock ahead of the daemon's: say nothing rather than a wrong «ahora».
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const minutos = Math.floor(ms / 60_000);
+  if (minutos < 1) return "ahora";
+  if (minutos < 60) return `${minutos}m`;
+  const horas = Math.floor(minutos / 60);
+  if (horas < 24) return `${horas}h`;
+  return `${Math.floor(horas / 24)}d`;
+}
+
 /** What is folded: the whole block, the groups closed inside it, and the projects filtered out. */
 export interface Plegado {
   readonly bloque: boolean;
