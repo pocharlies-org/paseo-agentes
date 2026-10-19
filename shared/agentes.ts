@@ -234,18 +234,19 @@ export function hace(desde: string | null | undefined, ahora: number): string | 
   return `${Math.floor(horas / 24)}d`;
 }
 
-/** What is folded: the whole block, the groups closed inside it, the workspaces and projects closed in the workspace grouping, and the projects filtered out. */
+/** What is folded: the whole block, the groups closed inside it, the workspaces and projects closed in the workspace grouping, the projects filtered out, and the groups the header counters filter to (empty: all). */
 export interface Plegado {
   readonly bloque: boolean;
   readonly grupos: readonly Grupo[];
   readonly workspaces: readonly string[];
   readonly proyectos: readonly string[];
   readonly ocultos: readonly string[];
+  readonly filtro: readonly Grupo[];
 }
 
 /** The fold as stored, read defensively: the storage is shared with Paseo and anything else on its origin. */
 export function leePlegado(texto: string | null): Plegado {
-  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; proyectos?: unknown; ocultos?: unknown } | null = null;
+  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; proyectos?: unknown; ocultos?: unknown; filtro?: unknown } | null = null;
   try {
     valor = JSON.parse(texto ?? "null");
   } catch {
@@ -261,6 +262,7 @@ export function leePlegado(texto: string | null): Plegado {
     workspaces: cadenas(valor?.workspaces),
     proyectos: cadenas(valor?.proyectos),
     ocultos: cadenas(valor?.ocultos),
+    filtro: cadenas(valor?.filtro).filter((grupo): grupo is Grupo => (GRUPOS as readonly string[]).includes(grupo)),
   };
 }
 

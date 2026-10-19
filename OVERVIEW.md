@@ -28,7 +28,9 @@ running row, since its turn began (like Paseo's row); for the rest, Paseo's atte
 the running→idle moment caught live after that, so it survives opening the agent. On load, an agent already read shows
 nothing until its next turn ends — the daemon keeps no finished-at time. The "Agentes" header folds and unfolds the whole block — folded, it leaves a single line with
 one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
-only your interactive sessions, or only Hermes. Folding and hidden projects persist per client.
+only your interactive sessions, or only Hermes. The header's counters are filters: pressing one shows only that group
+(press again to clear), and the icon at the end of the header switches the grouping (state ↔ project), the same value
+as «Cómo se agrupa» in Ajustes. Folding, hidden projects and the group filter persist per client.
 
 ## Grouping by project and workspace
 

@@ -51,6 +51,9 @@ const ICONOS: Record<Grupo, Dibujo> = {
   terminado: icono("Check"),
 };
 const ICONO_SIN_PROYECTO = icono("Circle");
+// The header's quick switch: the icon shows the grouping you get when you press it.
+const ICONO_GRUPOS = icono("Layers");
+const ICONO_ESTADO = icono("List");
 const ABIERTO = icono("ChevronDown");
 const CERRADO = icono("ChevronRight");
 
@@ -318,21 +321,25 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     // The filter is per project, after grouping so it hides rows and never a parent its children depend on; an agent whose
     // project is unknown is never hidden by it.
     const visibles = (filas: readonly Fila[]) => filas.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId));
-    const grupos = useMemo(
+    // The group filter (the header's counters) applies after grouping, like the project one, so no parent is hidden under a child it needs.
+    const filtrar = <T extends { grupo: Grupo }>(grupos: readonly T[]) =>
+      plegado.filtro.length === 0 ? grupos : grupos.filter((grupo) => plegado.filtro.includes(grupo.grupo));
+    const gruposVisibles = useMemo(
       () => todos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0),
       [todos, plegado.ocultos],
     );
+    const grupos = useMemo(() => filtrar(gruposVisibles), [gruposVisibles, plegado.filtro]);
     const porProy = useMemo(
       () =>
         porProyecto(agentes, subagentes, workspaces, proyectos)
           .map((proyecto) => ({
             ...proyecto,
             workspaces: proyecto.workspaces
-              .map((bloque) => ({ ...bloque, grupos: bloque.grupos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0) }))
+              .map((bloque) => ({ ...bloque, grupos: filtrar(bloque.grupos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0)) }))
               .filter((bloque) => bloque.grupos.length > 0),
           }))
           .filter((proyecto) => proyecto.workspaces.length > 0),
-      [agentes, subagentes, workspaces, proyectos, plegado.ocultos],
+      [agentes, subagentes, workspaces, proyectos, plegado.ocultos, plegado.filtro],
     );
     // One chip per project with rows, most crowded first: its badge toggles the project in and out.
     const fichas = useMemo(() => {
@@ -351,6 +358,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const sangria = { paddingLeft: 16, paddingTop: 6, paddingBottom: 2 };
     const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: 4 } as const;
     const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
+    const Cambio = modo === "estado" ? ICONO_GRUPOS : ICONO_ESTADO;
     // One status group with its rows, shared by the two groupings; `sangria` is where the workspace mode indents it under its header.
     const dibujaGrupo = ({ grupo, titulo, agentes: filas }: (typeof grupos)[number], sangria: number) => {
       const abierto = !plegado.grupos.includes(grupo);
@@ -438,15 +446,37 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         >
           <Pliegue size={12} color={tenue} />
           <Text style={[texto, { flex: 1 }]}>Agentes</Text>
-          {grupos.map(({ grupo, agentes }) => {
+          {gruposVisibles.map(({ grupo, titulo, agentes }) => {
             const Simbolo = ICONOS[grupo];
+            const activo = plegado.filtro.includes(grupo);
             return (
-              <View key={grupo} style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6 }}>
+              <Pressable
+                key={grupo}
+                accessibilityRole="button"
+                accessibilityLabel={`Filtrar por ${titulo}`}
+                accessibilityState={{ selected: activo }}
+                hitSlop={6}
+                onPress={() =>
+                  pliega({ ...plegado, filtro: activo ? plegado.filtro.filter((otro) => otro !== grupo) : [...plegado.filtro, grupo] })
+                }
+                style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6, opacity: activo || plegado.filtro.length === 0 ? 1 : 0.35 }}
+              >
                 <Simbolo size={12} color={tenue} />
                 <Text style={texto}>{agentes.length}</Text>
-              </View>
+              </Pressable>
             );
           })}
+          {ajustes.status === "ready" ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={modo === "estado" ? "Agrupar por proyecto" : "Agrupar por estado"}
+              hitSlop={6}
+              onPress={() => void ajustes.save({ ...ajustes.values, agrupar: modo === "estado" ? "workspace" : "estado" }, ajustes.revision)}
+              style={{ marginLeft: 8 }}
+            >
+              <Cambio size={12} color={tenue} />
+            </Pressable>
+          ) : null}
         </Pressable>
         {error ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
         {plegado.bloque ? null : (
