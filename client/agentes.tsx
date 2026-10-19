@@ -9,22 +9,24 @@ import type {
 import { useSettings } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SettingsCard, SettingsSection, SettingsSelect, SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
-import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Animated, Easing, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import {
   agrupar,
   enMarchaPorFila,
   hace,
   insignias,
   leePlegado,
+  porWorkspace,
   type Agente,
   type EnMarcha,
   type Grupo,
   type Insignia,
   type Plegado,
   type Proyecto,
+  type Workspace,
 } from "../shared/agentes.ts";
-import { ajustesAgentes, type Lado } from "../shared/ajustes.ts";
+import { ajustesAgentes, type Agrupar, type Lado } from "../shared/ajustes.ts";
 import { vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
@@ -80,6 +82,8 @@ interface Foto {
   readonly subagentes: ReadonlyMap<string, number>;
   /** Running Claude Code tasks (watchers) per Claude session id, read on the daemon host. */
   readonly vigilantes: Readonly<Record<string, number>>;
+  /** The daemon's workspace directory, by id: name, status and its time, for the workspace grouping. */
+  readonly workspaces: ReadonlyMap<string, Workspace>;
   readonly proyectos: readonly Proyecto[];
   readonly plegado: Plegado;
   readonly error: string | null;
@@ -93,7 +97,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -178,6 +182,39 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   const sueltaProyectos = client.paseo.projects.subscribe(() => void leeProyectos());
   void leeProyectos();
 
+  // The daemon's workspace directory — the same one that feeds Paseo's sidebar, with its own status and time per workspace.
+  // shortcut: first page only, like the agents list; a host with more workspaces than one page holds is not this block's case.
+  const trabajos = new Map<string, Workspace>();
+  const recorta = (w: { id: string; name: string; status: Workspace["status"]; statusEnteredAt: string | null }): Workspace => ({
+    id: w.id,
+    name: w.name,
+    status: w.status,
+    statusEnteredAt: w.statusEnteredAt,
+  });
+  let sueltaTrabajos: (() => void) | null = null;
+  let suscripcionTrabajos: { release(): Promise<void> } | null = null;
+  void client.paseo.workspaces
+    .list({ subscribe: {} })
+    .then(({ subscription }) => {
+      if (lifetime.signal.aborted) return void subscription.release();
+      suscripcionTrabajos = subscription;
+      sueltaTrabajos = subscription.subscribe({
+        snapshot: ({ entries }) => {
+          trabajos.clear();
+          for (const w of entries) trabajos.set(w.id, recorta(w));
+          publica({ workspaces: new Map(trabajos) });
+        },
+        update: (message) => {
+          if (message.type !== "workspace_update") return;
+          const cambio = message.payload;
+          if (cambio.kind === "upsert") trabajos.set(cambio.workspace.id, recorta(cambio.workspace));
+          else trabajos.delete(cambio.id);
+          publica({ workspaces: new Map(trabajos) });
+        },
+      });
+    })
+    .catch(falla);
+
   // Running Claude subagents (Task tool and workflows; background shells are not subagents for Paseo either), by parent and id.
   // shortcut: the event stream has no snapshot, so a subagent already running when this loads shows from its next action or
   // its end; upgrade if the plugin API gets a subagent list.
@@ -236,6 +273,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     if (ajustes.status === "loading") return <Text style={{ color: theme.colors.foregroundMuted }}>Cargando…</Text>;
     if (ajustes.status === "error") return <Text style={{ color: theme.colors.statusDanger }}>No se pudieron leer los ajustes</Text>;
     const { revision } = ajustes;
+    // `save` replaces the whole document: merge with what is on screen so changing one select keeps the other.
+    const valores = ajustes.status === "ready" ? ajustes.values : { lado: "izquierda" as Lado, agrupar: "estado" as Agrupar };
     return (
       <SettingsSection title="Agentes por estado">
         <SettingsCard>
@@ -245,7 +284,15 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             value={ajustes.status === "ready" ? ajustes.values.lado : "izquierda"}
             options={LADOS}
             disabled={ajustes.saving}
-            onValueChange={(valor) => void ajustes.save({ lado: valor as Lado }, revision)}
+            onValueChange={(valor) => void ajustes.save({ ...valores, lado: valor as Lado }, revision)}
+          />
+          <SettingsSelect
+            label="Cómo se agrupa"
+            hint="Por workspace: cabecera con el estado y la hora del workspace, dentro los grupos de estado y sus agentes, como la barra lateral de Paseo"
+            value={ajustes.status === "ready" ? ajustes.values.agrupar : "estado"}
+            options={AGRUPACIONES}
+            disabled={ajustes.saving}
+            onValueChange={(valor) => void ajustes.save({ ...valores, agrupar: valor as Agrupar }, revision)}
           />
         </SettingsCard>
         {ajustes.saveError ? <Text style={{ color: theme.colors.statusDanger }}>El host no aceptó el cambio</Text> : null}
@@ -254,7 +301,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   }
 
   function Bloque({ theme, host, abre, enPanel }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean }) {
-    const { agentes, subagentes, vigilantes, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
+    const { agentes, subagentes, vigilantes, workspaces, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
+    const ajustes = useSettings(ajustesAgentes);
+    const modo: Agrupar = ajustes.status === "ready" ? ajustes.values.agrupar : "estado";
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
     const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
@@ -267,12 +316,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     }, []);
     // The filter is per project, after grouping so it hides rows and never a parent its children depend on; an agent whose
     // project is unknown is never hidden by it.
+    const visibles = (filas: readonly Fila[]) => filas.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId));
     const grupos = useMemo(
-      () =>
-        todos
-          .map((grupo) => ({ ...grupo, agentes: grupo.agentes.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId)) }))
-          .filter((grupo) => grupo.agentes.length > 0),
+      () => todos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0),
       [todos, plegado.ocultos],
+    );
+    const porWs = useMemo(
+      () =>
+        porWorkspace(agentes, subagentes, workspaces)
+          .map((bloque) => ({ ...bloque, grupos: bloque.grupos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0) }))
+          .filter((bloque) => bloque.grupos.length > 0),
+      [agentes, subagentes, workspaces, plegado.ocultos],
     );
     // One chip per project with rows, most crowded first: its badge toggles the project in and out.
     const fichas = useMemo(() => {
@@ -291,6 +345,52 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const sangria = { paddingLeft: 16, paddingTop: 6, paddingBottom: 2 };
     const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: 4 } as const;
     const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
+    // One status group with its rows, shared by the two groupings; `sangria` is where the workspace mode indents it under its header.
+    const dibujaGrupo = ({ grupo, titulo, agentes: filas }: (typeof grupos)[number], sangria: number) => {
+      const abierto = !plegado.grupos.includes(grupo);
+      const Flecha = abierto ? ABIERTO : CERRADO;
+      return (
+        <Fragment key={`${sangria}${grupo}`}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: abierto }}
+            onPress={() =>
+              pliega({ ...plegado, grupos: abierto ? [...plegado.grupos, grupo] : plegado.grupos.filter((otro) => otro !== grupo) })
+            }
+            style={[linea, sangria ? { paddingLeft: sangria } : undefined]}
+          >
+            <Flecha size={12} color={tenue} />
+            <Text style={texto}>{`${titulo} · ${filas.length}`}</Text>
+          </Pressable>
+          {abierto
+            ? filas.map((agente) => {
+                const insignia = agente.projectId ? iconos.get(agente.projectId) : undefined;
+                // The time at the line's end: Paseo's row shows it for a running agent too, since its turn began; the rest, since it stopped talking.
+                const desde = grupo === "enEjecucion" ? agente.activeTurn?.startedAt ?? agente.updatedAt ?? terminos.get(agente.id) : terminos.get(agente.id);
+                const tiempo = hace(desde, Date.now());
+                const fila = {
+                  icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
+                  label: agente.title ?? "Sin título",
+                  onPress: () => abre(agente.id),
+                  trailing: (
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+                      {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
+                    </View>
+                  ),
+                };
+                return enPanel ? (
+                  <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} />
+                ) : (
+                  <View key={agente.id} style={sangria ? { paddingLeft: sangria } : undefined}>
+                    <SidebarRow id={agente.id} {...fila} />
+                  </View>
+                );
+              })
+            : null}
+        </Fragment>
+      );
+    };
     return (
       <View style={enPanel ? { flex: 1, paddingTop: 8 } : undefined}>
         {enPanel ? null : <SidebarSeparator />}
@@ -338,48 +438,36 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 );
               })}
             </View>
-            {grupos.map(({ grupo, titulo, agentes }) => {
-              const abierto = !plegado.grupos.includes(grupo);
-              const Flecha = abierto ? ABIERTO : CERRADO;
-              return (
-                <Fragment key={grupo}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: abierto }}
-                    onPress={() =>
-                      pliega({ ...plegado, grupos: abierto ? [...plegado.grupos, grupo] : plegado.grupos.filter((otro) => otro !== grupo) })
-                    }
-                    style={linea}
-                  >
-                    <Flecha size={12} color={tenue} />
-                    <Text style={texto}>{`${titulo} · ${agentes.length}`}</Text>
-                  </Pressable>
-                  {abierto
-                    ? agentes.map((agente) => {
-                        const insignia = agente.projectId ? iconos.get(agente.projectId) : undefined;
-                        // How long ago the turn ended, at the end of the line; a running agent has no finished turn to show.
-                        const tiempo = grupo === "enEjecucion" ? null : hace(terminos.get(agente.id), Date.now());
-                        const fila = {
-                          icon: insignia ? dibujo(insignia) : ICONOS[grupo],
-                          label: agente.title ?? "Sin título",
-                          onPress: () => abre(agente.id),
-                          trailing: (
-                            <View style={{ flexDirection: "row", alignItems: "center" }}>
-                              <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
-                              {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
-                            </View>
-                          ),
-                        };
-                        return enPanel ? (
-                          <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} />
-                        ) : (
-                          <SidebarRow key={agente.id} id={agente.id} {...fila} />
-                        );
-                      })
-                    : null}
-                </Fragment>
-              );
-            })}
+            {modo === "workspace"
+              ? porWs.map(({ workspace, grupos: delWorkspace }) => {
+                  const id = workspace?.id ?? "";
+                  const cerrado = plegado.workspaces.includes(id);
+                  const Flecha = cerrado ? CERRADO : ABIERTO;
+                  const total = delWorkspace.reduce((numero, grupo) => numero + grupo.agentes.length, 0);
+                  const tiempo = workspace ? hace(workspace.statusEnteredAt, Date.now()) : null;
+                  return (
+                    <Fragment key={id || "sin-workspace"}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: !cerrado }}
+                        onPress={() =>
+                          pliega({ ...plegado, workspaces: cerrado ? plegado.workspaces.filter((otro) => otro !== id) : [...plegado.workspaces, id] })
+                        }
+                        style={[linea, { paddingRight: 16 }]}
+                      >
+                        <Flecha size={12} color={tenue} />
+                        <PuntoEstado grupo={GRUPO_DE[workspace?.status ?? "done"]} theme={theme} />
+                        <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
+                          {workspace?.name ?? "Sin workspace"}
+                        </Text>
+                        <Text style={texto}>{total}</Text>
+                        {tiempo ? <Text style={[texto, { paddingLeft: 6 }]}>{tiempo}</Text> : null}
+                      </Pressable>
+                      {cerrado ? null : delWorkspace.map((grupo) => dibujaGrupo(grupo, 28))}
+                    </Fragment>
+                  );
+                })
+              : grupos.map((grupo) => dibujaGrupo(grupo, 0))}
           </ScrollView>
         )}
       </View>
@@ -393,12 +481,19 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   return () => {
     lifetime.abort();
     sueltaProyectos();
+    sueltaTrabajos?.();
+    void suscripcionTrabajos?.release();
   };
 }
 
 const LADOS = [
   { label: "Izquierda: barra lateral", value: "izquierda" },
   { label: "Derecha: panel del Explorer", value: "derecha" },
+];
+
+const AGRUPACIONES = [
+  { label: "Por estado: necesita datos, en ejecución…", value: "estado" },
+  { label: "Por workspace → estado → agentes", value: "workspace" },
 ];
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
@@ -440,6 +535,99 @@ function Marcas({ enMarcha, color }: { enMarcha: EnMarcha | undefined; color: st
       {marca("Eye", vigilantes)}
     </View>
   );
+}
+
+// The daemon's workspace status (WorkspaceDescriptorPayload) read as one of the block's groups: the same five states by Paseo's name.
+const GRUPO_DE: Record<Workspace["status"], Grupo> = {
+  needs_input: "necesitaDatos",
+  failed: "conError",
+  running: "enEjecucion",
+  attention: "paraRevisar",
+  done: "terminado",
+};
+
+// Paseo's statusDot band (app styles/theme.ts) is not in the plugin theme: the pair is picked by the surface's luminance.
+const PARES: Record<Grupo, readonly [claro: string, oscuro: string]> = {
+  necesitaDatos: ["#b37824", "#db932e"],
+  conError: ["#f12e2f", "#f7796d"],
+  enEjecucion: ["#268ae0", "#5caaf6"],
+  paraRevisar: ["#299f51", "#35c264"],
+  terminado: ["#000000", "#ffffff"], // unused: the muted dot takes its color from the theme
+};
+
+function esOscuro(fondo: string): boolean {
+  const hex = fondo.replace("#", "");
+  if (hex.length < 6) return true;
+  const [r, g, b] = [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! < 0.5;
+}
+
+function colorDe(grupo: Grupo, theme: PluginHostProps["theme"]): string {
+  if (grupo === "terminado") return theme.colors.foregroundMuted;
+  const [claro, oscuro] = PARES[grupo];
+  return esOscuro(theme.colors.surface0) ? oscuro : claro;
+}
+
+// Paseo's StatusRing (app components/status-ring), copied to its numbers: a 6-dot centre with a 1.5 gap and a 1.5-stroke
+// ring around it, one 900 ms turn. Plain RN Animated instead of Reanimated: a plugin cannot import the app's clock.
+function AnilloEstado({ color }: { color: string }) {
+  const giro = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const animacion = Animated.loop(
+      Animated.timing(giro, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: Platform.OS !== "web" }),
+    );
+    animacion.start();
+    return () => animacion.stop();
+  }, [giro]);
+  const rotar = giro.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  return (
+    <View style={{ width: 14, height: 14, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ position: "absolute", width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: color, opacity: 0.3 }} />
+      <Animated.View style={{ position: "absolute", width: 12, height: 12, transform: [{ rotate: rotar }] }}>
+        <View style={{ width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: "transparent", borderTopColor: color, opacity: 0.9 }} />
+      </Animated.View>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+    </View>
+  );
+}
+
+// Paseo's WorkspaceStatusIndicator (app sidebar-workspace-row-content.tsx): one slot where running is the ring,
+// needs_input the amber alert, attention a filled dot, and done a muted dot that only holds the rail.
+function PuntoEstado({ grupo, theme }: { grupo: Grupo; theme: PluginHostProps["theme"] }) {
+  const color = colorDe(grupo, theme);
+  const caja = { width: 14, height: 16, alignItems: "center", justifyContent: "center", flexShrink: 0 } as const;
+  if (grupo === "enEjecucion") {
+    return (
+      <View style={caja}>
+        <AnilloEstado color={color} />
+      </View>
+    );
+  }
+  if (grupo === "necesitaDatos") {
+    return (
+      <View style={caja}>
+        <Icon name="CircleAlert" size={12} color={color} />
+      </View>
+    );
+  }
+  return (
+    <View style={caja}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, opacity: grupo === "terminado" ? 0.3 : 1 }} />
+    </View>
+  );
+}
+
+// A row's icon has to be a component: one per group and color, so a row keeps its element across renders.
+const puntos = new Map<string, Dibujo>();
+function puntoDe(grupo: Grupo, theme: PluginHostProps["theme"]): Dibujo {
+  const color = colorDe(grupo, theme);
+  const clave = `${grupo}${color}`;
+  let dibujado = puntos.get(clave);
+  if (!dibujado) {
+    dibujado = () => <PuntoEstado grupo={grupo} theme={theme} />;
+    puntos.set(clave, dibujado);
+  }
+  return dibujado;
 }
 
 // shortcut: Paseo 0.11 gives `navigation.openAgent` to screens and panels, not to sidebar items, so a row opens this screen and the

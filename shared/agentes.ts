@@ -9,6 +9,8 @@ export interface Agente {
   readonly attentionReason?: "finished" | "error" | "permission" | null;
   readonly attentionTimestamp?: string | null;
   readonly workspaceId?: string;
+  readonly updatedAt?: string;
+  readonly activeTurn?: { readonly startedAt: string | null } | null;
   readonly labels?: Readonly<Record<string, string>>;
   readonly persistence?: { readonly sessionId: string } | null;
   readonly runtimeInfo?: { readonly sessionId: string | null };
@@ -58,33 +60,88 @@ export function raizDe<T extends Agente>(agente: T, porId: ReadonlyMap<string, T
   }
 }
 
-/**
- * The rows by the rules of Paseo's workspace status (server workspace-directory.ts), so this block and the status view agree:
- * only workspace roots are rows; a running child in the same workspace, or a running Claude subagent of the agent or of such
- * a child (`conSubagentes`: their parent agent ids), makes the root running. The non-empty groups in order, newest first by a
- * time that stays put while an agent streams, so rows do not move under the pointer.
- */
-export function agrupar<T extends Agente>(
+export interface GrupoDe<T extends Agente> {
+  readonly grupo: Grupo;
+  readonly titulo: string;
+  readonly agentes: T[];
+}
+
+/** The rows and what runs inside them, by the rules of Paseo's workspace status (server workspace-directory.ts). */
+function filasDe<T extends Agente>(
   agentes: readonly T[],
-  conSubagentes: { has(agentId: string): boolean } = new Set(),
-): { grupo: Grupo; titulo: string; agentes: T[] }[] {
+  conSubagentes: { has(agentId: string): boolean },
+): { filas: T[]; enMarcha: Set<string> } {
   const porId = new Map(agentes.map((agente) => [agente.id, agente]));
   const enMarcha = new Set<string>();
   for (const agente of agentes) {
     const raiz = raizDe(agente, porId);
     if (raiz && (conSubagentes.has(agente.id) || (raiz !== agente && agente.status === "running"))) enMarcha.add(raiz.id);
   }
-  const filas = agentes.filter((agente) => raizDe(agente, porId) === agente);
+  return { filas: agentes.filter((agente) => raizDe(agente, porId) === agente), enMarcha };
+}
+
+/** The non-empty groups in order, newest first by a time that stays put while an agent streams, so rows do not move under the pointer. */
+function gruposDe<T extends Agente>(filas: readonly T[], enMarcha: ReadonlySet<string>): GrupoDe<T>[] {
   const desde = (agente: Agente) => agente.attentionTimestamp ?? agente.createdAt;
-  return GRUPOS
-    .map((grupo) => ({
-      grupo,
-      titulo: TITULOS[grupo],
-      agentes: filas
-        .filter((agente) => grupoDe(agente, enMarcha.has(agente.id)) === grupo)
-        .sort((a, b) => desde(b).localeCompare(desde(a))),
-    }))
-    .filter((grupo) => grupo.agentes.length > 0);
+  return GRUPOS.map((grupo) => ({
+    grupo,
+    titulo: TITULOS[grupo],
+    agentes: filas
+      .filter((agente) => grupoDe(agente, enMarcha.has(agente.id)) === grupo)
+      .sort((a, b) => desde(b).localeCompare(desde(a))),
+  })).filter((grupo) => grupo.agentes.length > 0);
+}
+
+/**
+ * The rows by the rules of Paseo's workspace status, so this block and the status view agree: only workspace roots are rows;
+ * a running child in the same workspace, or a running Claude subagent of the agent or of such a child (`conSubagentes`: their
+ * parent agent ids), makes the root running.
+ */
+export function agrupar<T extends Agente>(
+  agentes: readonly T[],
+  conSubagentes: { has(agentId: string): boolean } = new Set(),
+): GrupoDe<T>[] {
+  const { filas, enMarcha } = filasDe(agentes, conSubagentes);
+  return gruposDe(filas, enMarcha);
+}
+
+/** The fields of a Paseo workspace (`WorkspaceDescriptorPayload`) its sidebar row is drawn from; its status is the daemon's own. */
+export interface Workspace {
+  readonly id: string;
+  readonly name: string;
+  readonly status: "needs_input" | "failed" | "running" | "attention" | "done";
+  readonly statusEnteredAt: string | null;
+}
+
+// Paseo's urgency order (`STATUS_BUCKET_PRIORITY` in app utils/sidebar-agent-state.ts): what needs you first, then what
+// failed, then what is moving. A workspace the daemon has not described yet sits behind every described one.
+const RANGO: Record<Workspace["status"], number> = { needs_input: 0, failed: 1, running: 2, attention: 3, done: 4 };
+
+/**
+ * Rows grouped by workspace, and inside each workspace by status group: the native sidebar's level over this plugin's groups.
+ * `agrupar` and this share `filasDe`, so a root is a row in exactly one of the two.
+ */
+export function porWorkspace<T extends Agente>(
+  agentes: readonly T[],
+  conSubagentes: { has(agentId: string): boolean } = new Set(),
+  workspaces: ReadonlyMap<string, Workspace> = new Map(),
+): { workspace: Workspace | null; grupos: GrupoDe<T>[] }[] {
+  const { filas, enMarcha } = filasDe(agentes, conSubagentes);
+  const porId = new Map<string | null, T[]>();
+  for (const fila of filas) {
+    const clave = fila.workspaceId ?? null;
+    const grupo = porId.get(clave);
+    if (grupo) grupo.push(fila);
+    else porId.set(clave, [fila]);
+  }
+  const rango = (id: string | null) => (id && workspaces.has(id) ? RANGO[workspaces.get(id)!.status] : GRUPOS.length);
+  const desde = (id: string | null) => (id ? workspaces.get(id)?.statusEnteredAt ?? "" : "");
+  return [...porId]
+    .sort(([a, fa], [b, fb]) => rango(a) - rango(b) || desde(b).localeCompare(desde(a)) || fb.length - fa.length)
+    .map(([id, filasDelWorkspace]) => ({
+      workspace: id ? workspaces.get(id) ?? null : null,
+      grupos: gruposDe(filasDelWorkspace, enMarcha),
+    }));
 }
 
 /** What a row has running in the background: Claude subagents and Claude Code tasks (watchers). */
@@ -131,16 +188,17 @@ export function hace(desde: string | null | undefined, ahora: number): string | 
   return `${Math.floor(horas / 24)}d`;
 }
 
-/** What is folded: the whole block, the groups closed inside it, and the projects filtered out. */
+/** What is folded: the whole block, the groups closed inside it, the workspaces closed in the workspace grouping, and the projects filtered out. */
 export interface Plegado {
   readonly bloque: boolean;
   readonly grupos: readonly Grupo[];
+  readonly workspaces: readonly string[];
   readonly ocultos: readonly string[];
 }
 
 /** The fold as stored, read defensively: the storage is shared with Paseo and anything else on its origin. */
 export function leePlegado(texto: string | null): Plegado {
-  let valor: { bloque?: unknown; grupos?: unknown; ocultos?: unknown } | null = null;
+  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; ocultos?: unknown } | null = null;
   try {
     valor = JSON.parse(texto ?? "null");
   } catch {
@@ -152,6 +210,7 @@ export function leePlegado(texto: string | null): Plegado {
   return {
     bloque: valor?.bloque === true,
     grupos: anterior && !grupos.includes("terminado") ? [...grupos, "terminado"] : grupos,
+    workspaces: Array.isArray(valor?.workspaces) ? valor.workspaces.filter((clave): clave is string => typeof clave === "string") : [],
     ocultos: Array.isArray(valor?.ocultos) ? valor.ocultos.filter((clave): clave is string => typeof clave === "string") : [],
   };
 }
