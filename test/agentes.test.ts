@@ -67,19 +67,21 @@ test("a stored fold is read back, and a broken or foreign one reads as nothing f
     workspaces: [],
     proyectos: [],
     ocultos: ["prj_1"],
+    filtro: [],
   });
   // Nothing stored, or a save from before "Terminado" existed (no `ocultos`): it starts folded.
-  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], proyectos: [], ocultos: [] };
+  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], proyectos: [], ocultos: [], filtro: [] };
   for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}', '{"bloque":false,"grupos":[]}']) {
     assert.deepEqual(leePlegado(texto), plegadoVacio);
   }
   // A save that knows "Terminado" respects the explicit choice, even if it is unfolded.
-  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"workspaces":[],"proyectos":["prj_1"],"ocultos":[]}'), {
+  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"workspaces":[],"proyectos":["prj_1"],"ocultos":[],"filtro":["enEjecucion","nada"]}'), {
     bloque: false,
     grupos: [],
     workspaces: [],
     proyectos: ["prj_1"],
     ocultos: [],
+    filtro: ["enEjecucion"],
   });
 });
 
