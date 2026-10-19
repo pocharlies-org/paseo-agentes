@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, grupoDe, hace, insignias, leePlegado, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, grupoDe, hace, insignias, leePlegado, porWorkspace, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -64,15 +64,16 @@ test("a stored fold is read back, and a broken or foreign one reads as nothing f
   assert.deepEqual(leePlegado(JSON.stringify({ bloque: true, grupos: ["paraRevisar", "otro", "toString"], ocultos: ["prj_1", 7] })), {
     bloque: true,
     grupos: ["paraRevisar"],
+    workspaces: [],
     ocultos: ["prj_1"],
   });
   // Nothing stored, or a save from before "Terminado" existed (no `ocultos`): it starts folded.
-  const plegadoVacio = { bloque: false, grupos: ["terminado"], ocultos: [] };
+  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], ocultos: [] };
   for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}', '{"bloque":false,"grupos":[]}']) {
     assert.deepEqual(leePlegado(texto), plegadoVacio);
   }
   // A save that knows "Terminado" respects the explicit choice, even if it is unfolded.
-  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"ocultos":[]}'), { bloque: false, grupos: [], ocultos: [] });
+  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"workspaces":[],"ocultos":[]}'), { bloque: false, grupos: [], workspaces: [], ocultos: [] });
 });
 
 test("a project gets the letter and color of Paseo's workspace list", () => {
@@ -117,4 +118,47 @@ test("each row adds up the subagents and watchers of the agent and of the childr
   const otro = agente("otro", { workspaceId: "w2", persistence: { sessionId: "s-otro" } });
   const porFila = enMarchaPorFila([padre, hijo, otro], new Map([["padre", 2], ["hijo", 1]]), { "s-padre": 1, "s-hijo": 2, "s-ajena": 5 });
   assert.deepEqual(Object.fromEntries(porFila), { padre: { subagentes: 3, vigilantes: 3 } });
+});
+
+const workspace = (id: string, estado: "needs_input" | "failed" | "running" | "attention" | "done", entró: string | null = null) => ({
+  id,
+  name: id,
+  status: estado,
+  statusEnteredAt: entró,
+});
+
+test("by workspace: urgent workspaces first, groups inside, unknowns last", () => {
+  const agentes = [
+    agente("tranquilo", { workspaceId: "w-hecho" }),
+    agente("pregunta", { workspaceId: "w-pide", pendingPermissions: [{}] }),
+    agente("corre", { workspaceId: "w-corre", status: "running" }),
+    agente("sin-sitio"),
+    agente("huerfano", { workspaceId: "w-desconocido" }),
+  ];
+  const trabajos = new Map([
+    ["w-hecho", workspace("w-hecho", "done", "2026-10-13T12:00:00.000Z")],
+    ["w-pide", workspace("w-pide", "needs_input", "2026-10-13T10:00:00.000Z")],
+    ["w-corre", workspace("w-corre", "running", "2026-10-13T11:00:00.000Z")],
+  ]);
+  const bloques = porWorkspace(agentes, new Set(), trabajos);
+  assert.deepEqual(
+    bloques.map(({ workspace: w, grupos }) => [w?.id ?? null, grupos.map(({ titulo, agentes: filas }) => [titulo, filas.map(({ id }) => id)])]),
+    [
+      ["w-pide", [["Necesita datos", ["pregunta"]]]],
+      ["w-corre", [["En ejecución", ["corre"]]]],
+      ["w-hecho", [["Terminado", ["tranquilo"]]]],
+      // A workspace the daemon has not described and an agent without one go last, in the order their rows arrived.
+      [null, [["Terminado", ["sin-sitio"]]]],
+      [null, [["Terminado", ["huerfano"]]]],
+    ],
+  );
+});
+
+test("by workspace: a newer status enters before an older one of the same urgency", () => {
+  const trabajos = new Map([
+    ["w-viejo", workspace("w-viejo", "done", "2026-10-13T09:00:00.000Z")],
+    ["w-nuevo", workspace("w-nuevo", "done", "2026-10-13T12:00:00.000Z")],
+  ]);
+  const bloques = porWorkspace([agente("a", { workspaceId: "w-viejo" }), agente("b", { workspaceId: "w-nuevo" })], new Set(), trabajos);
+  assert.deepEqual(bloques.map(({ workspace: w }) => w?.id), ["w-nuevo", "w-viejo"]);
 });
