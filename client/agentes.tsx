@@ -54,6 +54,23 @@ const ICONO_SIN_PROYECTO = icono("Circle");
 // The header's quick switch: the icon shows the grouping you get when you press it.
 const ICONO_GRUPOS = icono("Layers");
 const ICONO_ESTADO = icono("List");
+// Fold everything under a header at once.
+const TODO_CERRADO = icono("ChevronsDownUp");
+const TODO_ABIERTO = icono("ChevronsUpDown");
+
+// The two arrows that fold or unfold everything under a header; `label` names what they act on.
+function BotonesPlegar({ label, color, onPlegar, onDesplegar }: { label: string; color: string; onPlegar(): void; onDesplegar(): void }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 6, marginLeft: 6 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Plegar ${label}`} hitSlop={6} onPress={onPlegar}>
+        <TODO_CERRADO size={11} color={color} />
+      </Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Desplegar ${label}`} hitSlop={6} onPress={onDesplegar}>
+        <TODO_ABIERTO size={11} color={color} />
+      </Pressable>
+    </View>
+  );
+}
 const ABIERTO = icono("ChevronDown");
 const CERRADO = icono("ChevronRight");
 
@@ -359,6 +376,12 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: 4 } as const;
     const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
     const Cambio = modo === "estado" ? ICONO_GRUPOS : ICONO_ESTADO;
+    // «Plegar/desplegar todas»: the ids of the headers that exist now. Group folding stays global, as a group header's own fold is.
+    const idsWs = [...new Set(porProy.flatMap(({ workspaces }) => workspaces.map(({ workspace }) => workspace?.id ?? "")))];
+    const idsProy = [...new Set(porProy.map(({ proyecto }) => proyecto?.projectId ?? ""))];
+    const gruposVistos = [...new Set(todos.map(({ grupo }) => grupo))];
+    const pliegaTodo = (cerrar: boolean) =>
+      pliega({ ...plegado, grupos: cerrar ? gruposVistos : [], workspaces: cerrar ? idsWs : [], proyectos: cerrar ? idsProy : [] });
     // One status group with its rows, shared by the two groupings; `sangria` is where the workspace mode indents it under its header.
     const dibujaGrupo = ({ grupo, titulo, agentes: filas }: (typeof grupos)[number], sangria: number) => {
       const abierto = !plegado.grupos.includes(grupo);
@@ -430,6 +453,15 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             </Text>
             <Text style={texto}>{total}</Text>
             {tiempo ? <Text style={[texto, { paddingLeft: 6 }]}>{tiempo}</Text> : null}
+            <BotonesPlegar
+              label={`los grupos de ${workspace?.name ?? "este workspace"}`}
+              color={tenue}
+              onPlegar={() => pliega({ ...plegado, grupos: [...new Set([...plegado.grupos, ...delWorkspace.map(({ grupo }) => grupo)])] })}
+              onDesplegar={() => {
+                const propios = new Set(delWorkspace.map(({ grupo }) => grupo));
+                pliega({ ...plegado, grupos: plegado.grupos.filter((otro) => !propios.has(otro)) });
+              }}
+            />
           </Pressable>
           {cerrado ? null : delWorkspace.map((grupo) => dibujaGrupo(grupo, sangria + 12))}
         </Fragment>
@@ -466,6 +498,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
               </Pressable>
             );
           })}
+          <BotonesPlegar label="todo" color={tenue} onPlegar={() => pliegaTodo(true)} onDesplegar={() => pliegaTodo(false)} />
           {ajustes.status === "ready" ? (
             <Pressable
               accessibilityRole="button"
@@ -528,6 +561,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                           {proyecto?.projectCustomName ?? proyecto?.projectDisplayName ?? "Sin proyecto"}
                         </Text>
                         <Text style={texto}>{total}</Text>
+                        <BotonesPlegar
+                          label={`los workspaces de ${proyecto?.projectCustomName ?? proyecto?.projectDisplayName ?? "este proyecto"}`}
+                          color={tenue}
+                          onPlegar={() =>
+                            pliega({ ...plegado, workspaces: [...new Set([...plegado.workspaces, ...wss.map(({ workspace }) => workspace?.id ?? "")])] })
+                          }
+                          onDesplegar={() => {
+                            const propios = new Set(wss.map(({ workspace }) => workspace?.id ?? ""));
+                            pliega({ ...plegado, workspaces: plegado.workspaces.filter((otro) => !propios.has(otro)) });
+                          }}
+                        />
                       </Pressable>
                       {cerrado ? null : wss.map((bloque) => dibujaWorkspace(bloque, 28))}
                     </Fragment>
