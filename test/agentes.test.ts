@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, grupoDe, hace, insignias, leePlegado, porWorkspace, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -65,15 +65,22 @@ test("a stored fold is read back, and a broken or foreign one reads as nothing f
     bloque: true,
     grupos: ["paraRevisar"],
     workspaces: [],
+    proyectos: [],
     ocultos: ["prj_1"],
   });
   // Nothing stored, or a save from before "Terminado" existed (no `ocultos`): it starts folded.
-  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], ocultos: [] };
+  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], proyectos: [], ocultos: [] };
   for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}', '{"bloque":false,"grupos":[]}']) {
     assert.deepEqual(leePlegado(texto), plegadoVacio);
   }
   // A save that knows "Terminado" respects the explicit choice, even if it is unfolded.
-  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"workspaces":[],"ocultos":[]}'), { bloque: false, grupos: [], workspaces: [], ocultos: [] });
+  assert.deepEqual(leePlegado('{"bloque":false,"grupos":[],"workspaces":[],"proyectos":["prj_1"],"ocultos":[]}'), {
+    bloque: false,
+    grupos: [],
+    workspaces: [],
+    proyectos: ["prj_1"],
+    ocultos: [],
+  });
 });
 
 test("a project gets the letter and color of Paseo's workspace list", () => {
@@ -120,12 +127,12 @@ test("each row adds up the subagents and watchers of the agent and of the childr
   assert.deepEqual(Object.fromEntries(porFila), { padre: { subagentes: 3, vigilantes: 3 } });
 });
 
-const workspace = (id: string, estado: "needs_input" | "failed" | "running" | "attention" | "done", entró: string | null = null) => ({
-  id,
-  name: id,
-  status: estado,
-  statusEnteredAt: entró,
-});
+const workspace = (
+  id: string,
+  estado: "needs_input" | "failed" | "running" | "attention" | "done",
+  entró: string | null = null,
+  projectId = "",
+) => ({ id, name: id, projectId, status: estado, statusEnteredAt: entró });
 
 test("by workspace: urgent workspaces first, groups inside, unknowns last", () => {
   const agentes = [
@@ -161,4 +168,38 @@ test("by workspace: a newer status enters before an older one of the same urgenc
   ]);
   const bloques = porWorkspace([agente("a", { workspaceId: "w-viejo" }), agente("b", { workspaceId: "w-nuevo" })], new Set(), trabajos);
   assert.deepEqual(bloques.map(({ workspace: w }) => w?.id), ["w-nuevo", "w-viejo"]);
+});
+
+test("by project: the project asking comes first, its workspaces inside, unknowns last", () => {
+  const trabajos = new Map([
+    ["w-calma", workspace("w-calma", "done", "2026-10-13T12:00:00.000Z", "p-k8s")],
+    ["w-pide", workspace("w-pide", "needs_input", "2026-10-13T10:00:00.000Z", "p-hermes")],
+    ["w-corre", workspace("w-corre", "running", "2026-10-13T11:00:00.000Z", "p-k8s")],
+  ]);
+  const proyectos = [
+    { projectId: "p-k8s", projectDisplayName: "k8s" },
+    { projectId: "p-hermes", projectDisplayName: "hermes", projectCustomName: "Hermes" },
+  ];
+  const agentes = [
+    agente("tranquilo", { workspaceId: "w-calma" }),
+    agente("corre", { workspaceId: "w-corre", status: "running" }),
+    agente("pregunta", { workspaceId: "w-pide", pendingPermissions: [{}] }),
+    agente("sin-nada"),
+  ];
+  const bloques = porProyecto(agentes, new Set(), trabajos, proyectos);
+  assert.deepEqual(
+    bloques.map(({ proyecto, workspaces }) => [
+      proyecto?.projectCustomName ?? proyecto?.projectDisplayName ?? null,
+      workspaces.map(({ workspace: w, grupos }) => [w?.id ?? null, grupos.map(({ agentes: filas }) => filas.map(({ id }) => id))]),
+    ]),
+    [
+      // Hermes asks (needs_input), so it enters before k8s, whose most urgent is running.
+      ["Hermes", [["w-pide", [["pregunta"]]]]],
+      ["k8s", [["w-corre", [["corre"]]], ["w-calma", [["tranquilo"]]]]],
+      [null, [[null, [["sin-nada"]]]]],
+    ],
+  );
+  // The project of a row comes from its own projectId when the workspace is unknown to the daemon.
+  const sinTrabajo = porProyecto([agente("x", { workspaceId: "w-mudo", projectId: "p-k8s" })], new Set(), trabajos, proyectos);
+  assert.deepEqual(sinTrabajo.map(({ proyecto }) => proyecto?.projectDisplayName), ["k8s"]);
 });

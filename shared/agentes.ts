@@ -9,6 +9,7 @@ export interface Agente {
   readonly attentionReason?: "finished" | "error" | "permission" | null;
   readonly attentionTimestamp?: string | null;
   readonly workspaceId?: string;
+  readonly projectId?: string | null;
   readonly updatedAt?: string;
   readonly activeTurn?: { readonly startedAt: string | null } | null;
   readonly labels?: Readonly<Record<string, string>>;
@@ -109,6 +110,7 @@ export function agrupar<T extends Agente>(
 export interface Workspace {
   readonly id: string;
   readonly name: string;
+  readonly projectId: string;
   readonly status: "needs_input" | "failed" | "running" | "attention" | "done";
   readonly statusEnteredAt: string | null;
 }
@@ -141,6 +143,50 @@ export function porWorkspace<T extends Agente>(
     .map(([id, filasDelWorkspace]) => ({
       workspace: id ? workspaces.get(id) ?? null : null,
       grupos: gruposDe(filasDelWorkspace, enMarcha),
+    }));
+}
+
+export interface BloqueDeProyecto<T extends Agente> {
+  readonly proyecto: Proyecto | null;
+  readonly workspaces: { workspace: Workspace | null; grupos: GrupoDe<T>[] }[];
+}
+
+/**
+ * Rows grouped by project, then by workspace, then by status group — the native sidebar's two levels over this plugin's groups.
+ * A project ranks by its most urgent workspace (and its newest status), so the project asking for you comes first.
+ */
+export function porProyecto<T extends Agente>(
+  agentes: readonly T[],
+  conSubagentes: { has(agentId: string): boolean } = new Set(),
+  workspaces: ReadonlyMap<string, Workspace> = new Map(),
+  proyectos: readonly Proyecto[] = [],
+): BloqueDeProyecto<T>[] {
+  const { filas } = filasDe(agentes, conSubagentes);
+  const nombres = new Map(proyectos.map((proyecto) => [proyecto.projectId, proyecto]));
+  const proyectoDe = (fila: T) => fila.projectId ?? (fila.workspaceId ? workspaces.get(fila.workspaceId)?.projectId ?? null : null);
+  const porProy = new Map<string | null, T[]>();
+  for (const fila of filas) {
+    const clave = proyectoDe(fila);
+    const grupo = porProy.get(clave);
+    if (grupo) grupo.push(fila);
+    else porProy.set(clave, [fila]);
+  }
+  const rango = (filasP: readonly T[]) =>
+    filasP.reduce(
+      (mejor, fila) => Math.min(mejor, fila.workspaceId && workspaces.has(fila.workspaceId) ? RANGO[workspaces.get(fila.workspaceId)!.status] : GRUPOS.length),
+      GRUPOS.length + 1,
+    );
+  const desde = (filasP: readonly T[]) =>
+    filasP.reduce((mejor, fila) => {
+      const d = fila.workspaceId ? workspaces.get(fila.workspaceId)?.statusEnteredAt ?? "" : "";
+      return d > mejor ? d : mejor;
+    }, "");
+  const nombre = (id: string | null) => (id ? nombres.get(id)?.projectCustomName ?? nombres.get(id)?.projectDisplayName ?? "" : "");
+  return [...porProy]
+    .sort(([a, fa], [b, fb]) => rango(fa) - rango(fb) || desde(fb).localeCompare(desde(fa)) || nombre(a).localeCompare(nombre(b)))
+    .map(([id, filasP]) => ({
+      proyecto: id ? nombres.get(id) ?? null : null,
+      workspaces: porWorkspace(filasP, conSubagentes, workspaces),
     }));
 }
 
@@ -188,17 +234,18 @@ export function hace(desde: string | null | undefined, ahora: number): string | 
   return `${Math.floor(horas / 24)}d`;
 }
 
-/** What is folded: the whole block, the groups closed inside it, the workspaces closed in the workspace grouping, and the projects filtered out. */
+/** What is folded: the whole block, the groups closed inside it, the workspaces and projects closed in the workspace grouping, and the projects filtered out. */
 export interface Plegado {
   readonly bloque: boolean;
   readonly grupos: readonly Grupo[];
   readonly workspaces: readonly string[];
+  readonly proyectos: readonly string[];
   readonly ocultos: readonly string[];
 }
 
 /** The fold as stored, read defensively: the storage is shared with Paseo and anything else on its origin. */
 export function leePlegado(texto: string | null): Plegado {
-  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; ocultos?: unknown } | null = null;
+  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; proyectos?: unknown; ocultos?: unknown } | null = null;
   try {
     valor = JSON.parse(texto ?? "null");
   } catch {
@@ -207,11 +254,13 @@ export function leePlegado(texto: string | null): Plegado {
   const grupos = Array.isArray(valor?.grupos) ? valor.grupos.filter((grupo): grupo is Grupo => GRUPOS.includes(grupo)) : [];
   // "Terminado" arrived later: with nothing stored, or a save from before it existed, it starts folded so the block does not flood.
   const anterior = valor === null || valor.ocultos === undefined;
+  const cadenas = (v: unknown) => (Array.isArray(v) ? v.filter((clave): clave is string => typeof clave === "string") : []);
   return {
     bloque: valor?.bloque === true,
     grupos: anterior && !grupos.includes("terminado") ? [...grupos, "terminado"] : grupos,
-    workspaces: Array.isArray(valor?.workspaces) ? valor.workspaces.filter((clave): clave is string => typeof clave === "string") : [],
-    ocultos: Array.isArray(valor?.ocultos) ? valor.ocultos.filter((clave): clave is string => typeof clave === "string") : [],
+    workspaces: cadenas(valor?.workspaces),
+    proyectos: cadenas(valor?.proyectos),
+    ocultos: cadenas(valor?.ocultos),
   };
 }
 
