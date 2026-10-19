@@ -272,6 +272,8 @@ export interface Proyecto {
   readonly projectKey?: string;
   readonly projectDisplayName: string;
   readonly projectCustomName?: string | null;
+  /** Where the project lives on the host: a new workspace of this project is a directory at this path. */
+  readonly projectRootPath: string;
 }
 
 /** A project's icon as Paseo's workspace list draws it when the project has no image: its initial on its color. */

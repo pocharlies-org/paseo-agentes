@@ -26,7 +26,7 @@ import {
   type Proyecto,
   type Workspace,
 } from "../shared/agentes.ts";
-import { ajustesAgentes, type Agrupar, type Lado } from "../shared/ajustes.ts";
+import { ajustesAgentes, type Agrupar, type Lado, type Letra } from "../shared/ajustes.ts";
 import { vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
@@ -57,6 +57,10 @@ const ICONO_ESTADO = icono("List");
 // Fold everything under a header at once.
 const TODO_CERRADO = icono("ChevronsDownUp");
 const TODO_ABIERTO = icono("ChevronsUpDown");
+// Create here: an agent in a workspace, a workspace in a project.
+const ICONO_MAS = icono("Plus");
+// Font size and the air around each row; the first is today's look.
+const TAMANOS: Record<Letra, readonly [number, number, number]> = { normal: [11, 6, 4], grande: [12, 8, 5], muyGrande: [13, 10, 6] };
 
 // The two arrows that fold or unfold everything under a header; `label` names what they act on.
 function BotonesPlegar({ label, color, onPlegar, onDesplegar }: { label: string; color: string; onPlegar(): void; onDesplegar(): void }) {
@@ -128,6 +132,27 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   const falla = (error: unknown) => {
     if (!lifetime.signal.aborted) publica({ error: error instanceof Error ? error.message : String(error) });
   };
+
+  // The + buttons create through Paseo's own API, with the daemon's first available provider for the new agent.
+  // shortcut: an empty workspace would not draw (the list is born from the agents), so +workspace creates it with its first agent.
+  const conProveedor = (hacer: (proveedor: string) => Promise<unknown>) =>
+    client.paseo.providers
+      .listAvailable()
+      .then(({ providers }) => {
+        const proveedor = providers.find((p) => p.available)?.provider;
+        if (!proveedor) throw new Error("ningún proveedor de agentes disponible");
+        return hacer(proveedor);
+      })
+      .catch(falla);
+  const nuevoAgente = (workspaceId: string) =>
+    conProveedor((proveedor) => client.paseo.workspaces.ref(workspaceId).agents.create({ config: { provider: proveedor } }));
+  const nuevoWorkspace = (proyecto: Proyecto) =>
+    conProveedor((proveedor) =>
+      client.paseo.workspaces.create({
+        source: { kind: "directory", path: proyecto.projectRootPath, projectId: proyecto.projectId },
+        agent: { cwd: proyecto.projectRootPath, config: { provider: proveedor } },
+      }),
+    );
 
   // When each agent stopped talking: Paseo's attention timestamp while the notice stands, plus the running→idle moment
   // caught here, which survives opening the agent (Paseo clears the notice as soon as you see it).
@@ -295,7 +320,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     if (ajustes.status === "error") return <Text style={{ color: theme.colors.statusDanger }}>No se pudieron leer los ajustes</Text>;
     const { revision } = ajustes;
     // `save` replaces the whole document: merge with what is on screen so changing one select keeps the other.
-    const valores = ajustes.status === "ready" ? ajustes.values : { lado: "izquierda" as Lado, agrupar: "estado" as Agrupar };
+    const valores = ajustes.status === "ready" ? ajustes.values : { lado: "izquierda" as Lado, agrupar: "estado" as Agrupar, letra: "normal" as Letra };
     return (
       <SettingsSection title="Agentes por estado">
         <SettingsCard>
@@ -314,6 +339,14 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             options={AGRUPACIONES}
             disabled={ajustes.saving}
             onValueChange={(valor) => void ajustes.save({ ...valores, agrupar: valor as Agrupar }, revision)}
+          />
+          <SettingsSelect
+            label="Tamaño de letra"
+            hint="Con letra más grande las filas también respiran un poco más"
+            value={ajustes.status === "ready" ? ajustes.values.letra : "normal"}
+            options={LETRAS}
+            disabled={ajustes.saving}
+            onValueChange={(valor) => void ajustes.save({ ...valores, letra: valor as Letra }, revision)}
           />
         </SettingsCard>
         {ajustes.saveError ? <Text style={{ color: theme.colors.statusDanger }}>El host no aceptó el cambio</Text> : null}
@@ -370,10 +403,12 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       return enPanel ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>Ningún agente.</Text> : null;
     }
     const tenue = theme.colors.foregroundMuted;
-    const texto = { color: tenue, fontSize: 11 };
+    // The letter setting scales the size and the air of every row at once.
+    const [fuente, aire, hueco] = TAMANOS[ajustes.status === "ready" ? ajustes.values.letra : "normal"];
+    const texto = { color: tenue, fontSize: fuente };
     // Left edge of the rows' icons: the row's padding plus its button's.
-    const sangria = { paddingLeft: 16, paddingTop: 6, paddingBottom: 2 };
-    const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: 4 } as const;
+    const sangria = { paddingLeft: 16, paddingTop: aire, paddingBottom: Math.max(2, aire - 4) };
+    const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: hueco } as const;
     const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
     const Cambio = modo === "estado" ? ICONO_GRUPOS : ICONO_ESTADO;
     // «Plegar/desplegar todas»: the ids of the headers that exist now. Group folding stays global, as a group header's own fold is.
@@ -462,6 +497,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 pliega({ ...plegado, grupos: plegado.grupos.filter((otro) => !propios.has(otro)) });
               }}
             />
+            {workspace ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Añadir agente en ${workspace.name}`}
+                hitSlop={6}
+                onPress={() => nuevoAgente(workspace.id)}
+                style={{ marginLeft: 6 }}
+              >
+                <ICONO_MAS size={11} color={tenue} />
+              </Pressable>
+            ) : null}
           </Pressable>
           {cerrado ? null : delWorkspace.map((grupo) => dibujaGrupo(grupo, sangria + 12))}
         </Fragment>
@@ -572,6 +618,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                             pliega({ ...plegado, workspaces: plegado.workspaces.filter((otro) => !propios.has(otro)) });
                           }}
                         />
+                        {proyecto ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Añadir workspace en ${proyecto.projectCustomName ?? proyecto.projectDisplayName}`}
+                            hitSlop={6}
+                            onPress={() => nuevoWorkspace(proyecto)}
+                            style={{ marginLeft: 6 }}
+                          >
+                            <ICONO_MAS size={11} color={tenue} />
+                          </Pressable>
+                        ) : null}
                       </Pressable>
                       {cerrado ? null : wss.map((bloque) => dibujaWorkspace(bloque, 28))}
                     </Fragment>
@@ -604,6 +661,12 @@ const LADOS = [
 const AGRUPACIONES = [
   { label: "Por estado: necesita datos, en ejecución…", value: "estado" },
   { label: "Proyecto → workspace → estado → agentes", value: "workspace" },
+];
+
+const LETRAS = [
+  { label: "Normal (la de siempre)", value: "normal" },
+  { label: "Grande", value: "grande" },
+  { label: "Muy grande", value: "muyGrande" },
 ];
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
