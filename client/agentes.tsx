@@ -17,7 +17,7 @@ import {
   hace,
   insignias,
   leePlegado,
-  porWorkspace,
+  porProyecto,
   type Agente,
   type EnMarcha,
   type Grupo,
@@ -185,9 +185,10 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   // The daemon's workspace directory — the same one that feeds Paseo's sidebar, with its own status and time per workspace.
   // shortcut: first page only, like the agents list; a host with more workspaces than one page holds is not this block's case.
   const trabajos = new Map<string, Workspace>();
-  const recorta = (w: { id: string; name: string; status: Workspace["status"]; statusEnteredAt: string | null }): Workspace => ({
+  const recorta = (w: { id: string; name: string; projectId: string; status: Workspace["status"]; statusEnteredAt: string | null }): Workspace => ({
     id: w.id,
     name: w.name,
+    projectId: w.projectId,
     status: w.status,
     statusEnteredAt: w.statusEnteredAt,
   });
@@ -288,7 +289,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           />
           <SettingsSelect
             label="Cómo se agrupa"
-            hint="Por workspace: cabecera con el estado y la hora del workspace, dentro los grupos de estado y sus agentes, como la barra lateral de Paseo"
+            hint="Cuatro niveles: proyecto, workspace (con su estado y su hora), grupo de estado y agentes, como la barra lateral de Paseo"
             value={ajustes.status === "ready" ? ajustes.values.agrupar : "estado"}
             options={AGRUPACIONES}
             disabled={ajustes.saving}
@@ -321,12 +322,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       () => todos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0),
       [todos, plegado.ocultos],
     );
-    const porWs = useMemo(
+    const porProy = useMemo(
       () =>
-        porWorkspace(agentes, subagentes, workspaces)
-          .map((bloque) => ({ ...bloque, grupos: bloque.grupos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0) }))
-          .filter((bloque) => bloque.grupos.length > 0),
-      [agentes, subagentes, workspaces, plegado.ocultos],
+        porProyecto(agentes, subagentes, workspaces, proyectos)
+          .map((proyecto) => ({
+            ...proyecto,
+            workspaces: proyecto.workspaces
+              .map((bloque) => ({ ...bloque, grupos: bloque.grupos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0) }))
+              .filter((bloque) => bloque.grupos.length > 0),
+          }))
+          .filter((proyecto) => proyecto.workspaces.length > 0),
+      [agentes, subagentes, workspaces, proyectos, plegado.ocultos],
     );
     // One chip per project with rows, most crowded first: its badge toggles the project in and out.
     const fichas = useMemo(() => {
@@ -391,6 +397,36 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         </Fragment>
       );
     };
+    // One workspace with its groups under it; `sangria` is where the project mode indents it under the project header.
+    const dibujaWorkspace = (bloque: (typeof porProy)[number]["workspaces"][number], sangria: number) => {
+      const { workspace, grupos: delWorkspace } = bloque;
+      const id = workspace?.id ?? "";
+      const cerrado = plegado.workspaces.includes(id);
+      const Flecha = cerrado ? CERRADO : ABIERTO;
+      const total = delWorkspace.reduce((numero, grupo) => numero + grupo.agentes.length, 0);
+      const tiempo = workspace ? hace(workspace.statusEnteredAt, Date.now()) : null;
+      return (
+        <Fragment key={id || "sin-workspace"}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: !cerrado }}
+            onPress={() =>
+              pliega({ ...plegado, workspaces: cerrado ? plegado.workspaces.filter((otro) => otro !== id) : [...plegado.workspaces, id] })
+            }
+            style={[linea, { paddingLeft: sangria, paddingRight: 16 }]}
+          >
+            <Flecha size={12} color={tenue} />
+            <PuntoEstado grupo={GRUPO_DE[workspace?.status ?? "done"]} theme={theme} />
+            <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
+              {workspace?.name ?? "Sin workspace"}
+            </Text>
+            <Text style={texto}>{total}</Text>
+            {tiempo ? <Text style={[texto, { paddingLeft: 6 }]}>{tiempo}</Text> : null}
+          </Pressable>
+          {cerrado ? null : delWorkspace.map((grupo) => dibujaGrupo(grupo, sangria + 12))}
+        </Fragment>
+      );
+    };
     return (
       <View style={enPanel ? { flex: 1, paddingTop: 8 } : undefined}>
         {enPanel ? null : <SidebarSeparator />}
@@ -439,31 +475,31 @@ export function contributeAgentes(client: PluginClientContext): () => void {
               })}
             </View>
             {modo === "workspace"
-              ? porWs.map(({ workspace, grupos: delWorkspace }) => {
-                  const id = workspace?.id ?? "";
-                  const cerrado = plegado.workspaces.includes(id);
+              ? porProy.map(({ proyecto, workspaces: wss }) => {
+                  const id = proyecto?.projectId ?? "";
+                  const cerrado = plegado.proyectos.includes(id);
                   const Flecha = cerrado ? CERRADO : ABIERTO;
-                  const total = delWorkspace.reduce((numero, grupo) => numero + grupo.agentes.length, 0);
-                  const tiempo = workspace ? hace(workspace.statusEnteredAt, Date.now()) : null;
+                  const total = wss.reduce((numero, bloque) => numero + bloque.grupos.reduce((n, g) => n + g.agentes.length, 0), 0);
+                  const insignia = proyecto ? iconos.get(proyecto.projectId) : undefined;
+                  const Icono = insignia ? dibujo(insignia) : ICONO_SIN_PROYECTO;
                   return (
-                    <Fragment key={id || "sin-workspace"}>
+                    <Fragment key={id || "sin-proyecto"}>
                       <Pressable
                         accessibilityRole="button"
                         accessibilityState={{ expanded: !cerrado }}
                         onPress={() =>
-                          pliega({ ...plegado, workspaces: cerrado ? plegado.workspaces.filter((otro) => otro !== id) : [...plegado.workspaces, id] })
+                          pliega({ ...plegado, proyectos: cerrado ? plegado.proyectos.filter((otro) => otro !== id) : [...plegado.proyectos, id] })
                         }
                         style={[linea, { paddingRight: 16 }]}
                       >
                         <Flecha size={12} color={tenue} />
-                        <PuntoEstado grupo={GRUPO_DE[workspace?.status ?? "done"]} theme={theme} />
+                        <Icono size={14} color={tenue} />
                         <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
-                          {workspace?.name ?? "Sin workspace"}
+                          {proyecto?.projectCustomName ?? proyecto?.projectDisplayName ?? "Sin proyecto"}
                         </Text>
                         <Text style={texto}>{total}</Text>
-                        {tiempo ? <Text style={[texto, { paddingLeft: 6 }]}>{tiempo}</Text> : null}
                       </Pressable>
-                      {cerrado ? null : delWorkspace.map((grupo) => dibujaGrupo(grupo, 28))}
+                      {cerrado ? null : wss.map((bloque) => dibujaWorkspace(bloque, 28))}
                     </Fragment>
                   );
                 })
@@ -493,7 +529,7 @@ const LADOS = [
 
 const AGRUPACIONES = [
   { label: "Por estado: necesita datos, en ejecución…", value: "estado" },
-  { label: "Por workspace → estado → agentes", value: "workspace" },
+  { label: "Proyecto → workspace → estado → agentes", value: "workspace" },
 ];
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.

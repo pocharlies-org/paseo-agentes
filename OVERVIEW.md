@@ -30,16 +30,17 @@ nothing until its next turn ends — the daemon keeps no finished-at time. The "
 one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
 only your interactive sessions, or only Hermes. Folding and hidden projects persist per client.
 
-## Grouping by workspace
+## Grouping by project and workspace
 
-The setting «Cómo se agrupa» (same Ajustes screen) switches the block from the state groups to
-**workspace → state group → agents**: a header per workspace with Paseo's own status indicator and time (the daemon's
-workspace directory, streamed live — the ring while it runs, the amber alert when it asks, the filled dot when
-something waits to be read, the muted dot when it is done), the state groups indented under it, and the agent rows
-under those. Workspaces come most urgent first (needs input, failed, running, attention, done), newest status first
-inside a rank; an agent whose workspace the daemon has not described sits behind all described ones. The header folds
-its workspace; the fold persists like the rest. In this grouping a row's leading glyph is the status indicator, not the
-project badge — the header already says where the agent is.
+The setting «Cómo se agrupa» (same Ajustes screen) switches the block from the state groups to four levels,
+**project → workspace → state group → agents**, the native sidebar's two levels over this plugin's groups: a header
+per project (its Paseo badge and name, ordered by its most urgent workspace), a header per workspace with Paseo's own
+status indicator and time (the daemon's workspace directory, streamed live — the ring while it runs, the amber alert
+when it asks, the filled dot when something waits to be read, the muted dot when it is done), the state groups
+indented under it, and the agent rows under those. Workspaces come most urgent first (needs input, failed, running,
+attention, done), newest status first inside a rank; an agent whose workspace the daemon has not described sits behind
+all described ones. Each header folds its branch; the folds persist like the rest. In this grouping a row's leading
+glyph is the status indicator, not the project badge — the headers already say where the agent is.
 
 ## Left or right, configurable
 
