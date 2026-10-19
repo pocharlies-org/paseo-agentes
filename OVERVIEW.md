@@ -30,7 +30,9 @@ nothing until its next turn ends — the daemon keeps no finished-at time. The "
 one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
 only your interactive sessions, or only Hermes. The header's counters are filters: pressing one shows only that group
 (press again to clear), and the icon at the end of the header switches the grouping (state ↔ project), the same value
-as «Cómo se agrupa» in Ajustes. Folding, hidden projects and the group filter persist per client.
+as «Cómo se agrupa» in Ajustes. Two more arrows fold or unfold everything at once: on the block header (projects,
+workspaces and groups), on a project header (its workspaces) and on a workspace header (its groups). Folding, hidden
+projects and the group filter persist per client.
 
 ## Grouping by project and workspace
 
