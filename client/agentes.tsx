@@ -181,7 +181,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     leyendo = true;
     void client
       .rpc(vigilantesList, {})
-      .then(({ sesiones }) => publica({ vigilantes: sesiones }), falla)
+      // Un fallo o timeout del escaneo no pinta el bloque de rojo: el recuento es auxiliar y se queda como estaba.
+      .then(({ sesiones }) => publica({ vigilantes: sesiones }), () => {})
       .finally(() =>
         setTimeout(() => {
           leyendo = false;
