@@ -35,7 +35,9 @@ workspaces and groups), on a project header (its workspaces) and on a workspace 
 projects and the group filter persist per client. Next to those arrows, a `+` on a workspace header creates a new agent
 in that workspace, and a `+` on a project header creates a new workspace in that project (with its first agent, so it
 appears); both use Paseo's own create API with the daemon's first available provider. The setting «Tamaño de letra»
-(same Ajustes screen) grows the row text and its spacing: normal (the default), grande, muyGrande.
+(same Ajustes screen) sizes the rows and headers: **normal** (the default — the same size as Paseo's native Workspaces
+rows), **compacta** (small rows and headers; the agent rows are drawn by the plugin, since the host's `SidebarRow` has no
+size prop), grande and muyGrande on top of it.
 
 ## Grouping by project and workspace
 

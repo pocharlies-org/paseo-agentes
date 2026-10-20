@@ -59,8 +59,9 @@ const TODO_CERRADO = icono("ChevronsDownUp");
 const TODO_ABIERTO = icono("ChevronsUpDown");
 // Create here: an agent in a workspace, a workspace in a project.
 const ICONO_MAS = icono("Plus");
-// Font size and the air around each row; the first is today's look.
-const TAMANOS: Record<Letra, readonly [number, number, number]> = { normal: [11, 6, 4], grande: [12, 8, 5], muyGrande: [13, 10, 6] };
+// Font size and the air around each header. «normal» is Paseo's own row size (the native Workspaces look); «compacta»
+// also draws the agent rows itself, since the host's SidebarRow has no size prop.
+const TAMANOS: Record<Letra, readonly [number, number, number]> = { compacta: [11, 2, 3], normal: [14, 8, 6], grande: [15, 10, 7], muyGrande: [16, 12, 8] };
 
 // The two arrows that fold or unfold everything under a header; `label` names what they act on.
 function BotonesPlegar({ label, color, onPlegar, onDesplegar }: { label: string; color: string; onPlegar(): void; onDesplegar(): void }) {
@@ -404,7 +405,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     }
     const tenue = theme.colors.foregroundMuted;
     // The letter setting scales the size and the air of every row at once.
-    const [fuente, aire, hueco] = TAMANOS[ajustes.status === "ready" ? ajustes.values.letra : "normal"];
+    const letra: Letra = ajustes.status === "ready" ? ajustes.values.letra : "normal";
+    const [fuente, aire, hueco] = TAMANOS[letra];
     const texto = { color: tenue, fontSize: fuente };
     // Left edge of the rows' icons: the row's padding plus its button's.
     const sangria = { paddingLeft: 16, paddingTop: aire, paddingBottom: Math.max(2, aire - 4) };
@@ -451,8 +453,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                     </View>
                   ),
                 };
-                return enPanel ? (
-                  <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} />
+                // Compacta draws the rows itself: the host's SidebarRow has no size prop and would stay at native size.
+                return enPanel || letra === "compacta" ? (
+                  <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} tam={fuente} />
                 ) : (
                   <View key={agente.id} style={sangria ? { paddingLeft: sangria } : undefined}>
                     <SidebarRow id={agente.id} {...fila} />
@@ -664,22 +667,23 @@ const AGRUPACIONES = [
 ];
 
 const LETRAS = [
-  { label: "Normal (la de siempre)", value: "normal" },
+  { label: "Compacta: filas y cabeceras pequeñas", value: "compacta" },
+  { label: "Normal: la misma talla que Workspaces", value: "normal" },
   { label: "Grande", value: "grande" },
   { label: "Muy grande", value: "muyGrande" },
 ];
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
-function FilaPanel({ icon: Icono, label, onPress, trailing, color }: { icon: Dibujo; label: string; onPress(): void; trailing: React.ReactNode; color: string }) {
+function FilaPanel({ icon: Icono, label, onPress, trailing, color, tam = 13 }: { icon: Dibujo; label: string; onPress(): void; trailing: React.ReactNode; color: string; tam?: number }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: Math.max(2, tam - 8), opacity: pressed ? 0.6 : 1 })}
     >
-      <Icono size={14} color={color} />
-      <Text style={{ flex: 1, color, fontSize: 13 }} numberOfLines={2}>
+      <Icono size={tam} color={color} />
+      <Text style={{ flex: 1, color, fontSize: tam }} numberOfLines={2}>
         {label}
       </Text>
       {trailing}
