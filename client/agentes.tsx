@@ -134,24 +134,26 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     if (!lifetime.signal.aborted) publica({ error: error instanceof Error ? error.message : String(error) });
   };
 
-  // The + buttons create through Paseo's own API, with the daemon's first available provider for the new agent.
+  // The + buttons create through Paseo's own API. The daemon wants `config.provider` as "provider/model", so the default
+  // comes from the provider snapshot: the first enabled provider's default (else first selectable) model.
   // shortcut: an empty workspace would not draw (the list is born from the agents), so +workspace creates it with its first agent.
-  const conProveedor = (hacer: (proveedor: string) => Promise<unknown>) =>
+  const conProveedor = (hacer: (config: { provider: string }) => Promise<unknown>) =>
     client.paseo.providers
-      .listAvailable()
-      .then(({ providers }) => {
-        const proveedor = providers.find((p) => p.available)?.provider;
-        if (!proveedor) throw new Error("ningún proveedor de agentes disponible");
-        return hacer(proveedor);
+      .snapshot()
+      .then(({ entries }) => {
+        const entrada = entries.find((e) => e.enabled && !e.error && e.models?.length);
+        const modelo = entrada?.models?.find((m) => m.isDefault) ?? entrada?.models?.find((m) => m.isSelectable !== false);
+        if (!entrada || !modelo) throw new Error("ningún proveedor de agentes disponible");
+        return hacer({ provider: `${entrada.provider}/${modelo.id}` });
       })
       .catch(falla);
   const nuevoAgente = (workspaceId: string) =>
-    conProveedor((proveedor) => client.paseo.workspaces.ref(workspaceId).agents.create({ config: { provider: proveedor } }));
+    conProveedor((config) => client.paseo.workspaces.ref(workspaceId).agents.create({ config }));
   const nuevoWorkspace = (proyecto: Proyecto) =>
-    conProveedor((proveedor) =>
+    conProveedor((config) =>
       client.paseo.workspaces.create({
         source: { kind: "directory", path: proyecto.projectRootPath, projectId: proyecto.projectId },
-        agent: { cwd: proyecto.projectRootPath, config: { provider: proveedor } },
+        agent: { cwd: proyecto.projectRootPath, config },
       }),
     );
 
