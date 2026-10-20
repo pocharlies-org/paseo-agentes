@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,14 +15,31 @@ test("a task file held open by a live process counts for its session, and stops 
   const hijo = spawn("sleep", ["30"], { stdio: ["ignore", fd, "ignore"] });
   closeSync(fd);
   try {
-    assert.equal((await vigilantes())[sesion], 1);
+    assert.equal((await vigilantes({ sinCache: true }))[sesion], 1);
   } finally {
     const fin = new Promise((ok) => hijo.once("exit", ok));
     hijo.kill();
     await fin;
     rmSync(raiz, { recursive: true, force: true });
   }
-  assert.equal((await vigilantes())[sesion], undefined);
+  assert.equal((await vigilantes({ sinCache: true }))[sesion], undefined);
+});
+
+test("la caché reutiliza el resultado sin reescanear mientras sea reciente", async () => {
+  const raiz = mkdtempSync(join(tmpdir(), "vigilantes-cache-"));
+  const sesion = "0f0e0d0c-0b0a-4908-8706-050403020100";
+  const destino = join(raiz, "claude-1000", "-home-x", sesion, "tasks", "b1x2y3z4.output");
+  const fd = join(raiz, "4242", "fd");
+  mkdirSync(fd, { recursive: true });
+  symlinkSync(destino, join(fd, "7"));
+  const opciones = { proc: raiz };
+  try {
+    assert.equal((await vigilantes(opciones))[sesion], 1);
+    rmSync(join(raiz, "4242"), { recursive: true, force: true }); // gone: a fresh scan would find nothing
+    assert.equal((await vigilantes(opciones))[sesion], 1); // still the cached result, not a rescan
+  } finally {
+    rmSync(raiz, { recursive: true, force: true });
+  }
 });
 
 test("a missing /proc falls back without throwing", async () => {
