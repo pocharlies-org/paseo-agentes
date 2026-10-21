@@ -113,6 +113,10 @@ export interface Workspace {
   readonly projectId: string;
   readonly status: "needs_input" | "failed" | "running" | "attention" | "done";
   readonly statusEnteredAt: string | null;
+  /** The clone root on the daemon host: the fallback when a workspace has no directory of its own. */
+  readonly projectRootPath?: string;
+  /** Where the workspace's sessions run (its worktree when it has one): what «Cambios» and the transcript are read by. */
+  readonly directory?: string;
 }
 
 // Paseo's urgency order (`STATUS_BUCKET_PRIORITY` in app utils/sidebar-agent-state.ts): what needs you first, then what
@@ -242,11 +246,14 @@ export interface Plegado {
   readonly proyectos: readonly string[];
   readonly ocultos: readonly string[];
   readonly filtro: readonly Grupo[];
+  /** The panel's extra sections, folded like the groups: open by default. */
+  readonly cambios: boolean;
+  readonly tareas: boolean;
 }
 
 /** The fold as stored, read defensively: the storage is shared with Paseo and anything else on its origin. */
 export function leePlegado(texto: string | null): Plegado {
-  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; proyectos?: unknown; ocultos?: unknown; filtro?: unknown } | null = null;
+  let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; proyectos?: unknown; ocultos?: unknown; filtro?: unknown; cambios?: unknown; tareas?: unknown } | null = null;
   try {
     valor = JSON.parse(texto ?? "null");
   } catch {
@@ -263,6 +270,8 @@ export function leePlegado(texto: string | null): Plegado {
     proyectos: cadenas(valor?.proyectos),
     ocultos: cadenas(valor?.ocultos),
     filtro: cadenas(valor?.filtro).filter((grupo): grupo is Grupo => (GRUPOS as readonly string[]).includes(grupo)),
+    cambios: valor?.cambios === true,
+    tareas: valor?.tareas === true,
   };
 }
 

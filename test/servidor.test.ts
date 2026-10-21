@@ -10,5 +10,5 @@ test("the server part registers its RPCs and settings and returns the cleanup Pa
     registerSettings: () => ({ read: async () => ({ status: "ready", values: { lado: "izquierda" } }) }),
   } as unknown as PluginServerContext;
   assert.equal(typeof contribute(servidor), "function");
-  assert.deepEqual(rpcs, ["vigilantes.list"]);
+  assert.deepEqual(rpcs, ["vigilantes.list", "cambios.list", "contexto.list"]);
 });
