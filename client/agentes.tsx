@@ -110,8 +110,8 @@ interface Foto {
   /** The daemon's workspace directory, by id: name, status and its time, for the workspace grouping. */
   readonly workspaces: ReadonlyMap<string, Workspace>;
   readonly proyectos: readonly Proyecto[];
-  /** Open PRs with their Actions rollup and worktrees without one, per clone root (the panel's «Cambios»). */
-  readonly cambios: Readonly<Record<string, readonly CambiosLinea[]>>;
+  /** The open PR of each workspace's branch with its Actions rollup, or the branch when it has no PR (the panel's «Cambios»). */
+  readonly cambios: readonly CambiosLinea[];
   /** The Claude Code task list per session id (the panel's «Tareas»). */
   readonly tareas: Readonly<Record<string, readonly Tarea[]>>;
   /** Context used by the last turn, in tokens, per session id. */
@@ -128,7 +128,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], cambios: {}, tareas: {}, contexto: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], cambios: [], tareas: {}, contexto: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -249,7 +249,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     status: Workspace["status"];
     statusEnteredAt: string | null;
     projectRootPath?: string;
-    workspaceDirectory?: string;
+    directory?: string;
   }): Workspace => ({
     id: w.id,
     name: w.name,
@@ -257,7 +257,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     status: w.status,
     statusEnteredAt: w.statusEnteredAt,
     projectRootPath: w.projectRootPath,
-    workspaceDirectory: w.workspaceDirectory,
+    directory: w.directory,
   });
   let sueltaTrabajos: (() => void) | null = null;
   let suscripcionTrabajos: { release(): Promise<void> } | null = null;
@@ -327,7 +327,13 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       return;
     }
     leyendoCambios = true;
-    const rutas = [...new Set([...trabajos.values()].map((w) => w.projectRootPath).filter((r): r is string => !!r))];
+    const rutas = [
+      ...new Set(
+        [...trabajos.values()]
+          .map((w) => w.directory ?? w.projectRootPath)
+          .filter((r): r is string => !!r),
+      ),
+    ];
     void client
       .rpc(cambiosList, { rutas })
       // A gh failure leaves the last good list: the section is auxiliary and must not paint the block red.
@@ -358,7 +364,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           .map((agente) => {
             const id = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
             const ws = agente.workspaceId ? trabajos.get(agente.workspaceId) : undefined;
-            const cwd = ws?.workspaceDirectory ?? ws?.projectRootPath;
+            const cwd = ws?.directory ?? ws?.projectRootPath;
             return id && cwd ? [id, { id, cwd }] : null;
           })
           .filter((s): s is [string, { id: string; cwd: string }] => s !== null),
@@ -489,8 +495,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       }
       return [...conteo].sort(([, a], [, b]) => b - a);
     }, [todos]);
-    // The panel's extra sections: Cambios counts lines, Tareas counts tasks of the agents that are rows (not folded children).
-    const totalCambios = Object.values(cambios).reduce((numero, lineas) => numero + lineas.length, 0);
+    // The panel's extra sections: Tareas counts tasks of the agents that are rows (not folded children).
     const sesionDe = (agente: Fila) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
     const raices = useMemo(() => new Set(todos.flatMap((grupo) => grupo.agentes.map((agente) => agente.id))), [todos]);
     const filasConTareas = useMemo(
@@ -740,33 +745,24 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   );
                 })
               : grupos.map((grupo) => dibujaGrupo(grupo, 0))}
-            {enPanel && totalCambios > 0 ? (
+            {enPanel && cambios.length > 0 ? (
               <Seccion
                 titulo="Cambios"
-                total={totalCambios}
+                total={cambios.length}
                 abierto={!plegado.cambios}
                 onPlegar={() => pliega({ ...plegado, cambios: !plegado.cambios })}
                 texto={texto}
                 linea={linea}
                 tenue={tenue}
               >
-                {Object.entries(cambios)
-                  .filter(([, lineas]) => lineas.length > 0)
-                  .map(([ruta, lineas]) => (
-                    <Fragment key={ruta}>
-                      <Text style={[texto, { paddingLeft: 28, paddingTop: 2 }]} numberOfLines={1}>
-                        {ruta.split("/").filter(Boolean).at(-1) ?? ruta}
-                      </Text>
-                      {lineas.map((cambio, i) => (
-                        <View key={`${ruta}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: hueco, paddingLeft: 40, paddingRight: 16, paddingVertical: 2 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colorDe(GRUPO_DEL_CAMBIO[cambio.estado], theme) }} />
-                          <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
-                            {cambio.texto}
-                          </Text>
-                        </View>
-                      ))}
-                    </Fragment>
-                  ))}
+                {cambios.map((cambio, i) => (
+                  <View key={`${cambio.texto}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: hueco, paddingLeft: 28, paddingRight: 16, paddingVertical: 2 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colorDe(GRUPO_DEL_CAMBIO[cambio.estado], theme) }} />
+                    <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
+                      {cambio.texto}
+                    </Text>
+                  </View>
+                ))}
               </Seccion>
             ) : null}
             {enPanel && totalTareas > 0 ? (

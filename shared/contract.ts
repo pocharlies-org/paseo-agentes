@@ -18,11 +18,11 @@ export const CambiosLineaSchema = z.object({
 });
 export type CambiosLinea = z.infer<typeof CambiosLineaSchema>;
 
-/** The open PRs with their GitHub Actions rollup and the worktrees without one, per clone root (SC-2838, like Claude Desktop). */
+/** The open PR of each workspace's branch with its GitHub Actions rollup, or the branch when it has no PR (SC-2838, like Claude Desktop). */
 export const cambiosList = defineRpc({
   name: "cambios.list",
   input: z.object({ rutas: z.array(z.string()) }).strict(),
-  output: z.object({ cambios: z.record(z.string(), z.array(CambiosLineaSchema)) }),
+  output: z.object({ cambios: z.array(CambiosLineaSchema) }),
 });
 
 export const TareaSchema = z.object({

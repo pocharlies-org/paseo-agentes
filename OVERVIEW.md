@@ -90,10 +90,10 @@ its context:
 
 - **Tokens of context** at the end of each row (e.g. `117k`): what the last turn held, read from the session's
   transcript (`~/.claude/projects/<cwd>/<session>.jsonl`, its last `usage`).
-- **Cambios**: the open PR of each worktree's branch with its GitHub Actions rollup (`repo #12 · title · 4/5` and a
-  colored dot: green, red, running, no checks) and the worktrees with no PR — found by the house convention
-  (`<clone>/.claude/worktrees/…`, `<clone>/.wt-…`) and resolved with `gh pr view --json statusCheckRollup`. Refreshed
-  per clone root every 60 s and on workspace changes.
+- **Cambios**: the open PR of each workspace's branch with its GitHub Actions rollup (`repo #12 · title · 4/5` and a
+  colored dot: green, red, running, no checks), or `repo · branch` when the branch has no PR — resolved with
+  `gh pr view --json statusCheckRollup`, one call per workspace (two workspaces on the same branch are one line).
+  Refreshed every 60 s and on workspace changes.
 - **Tareas**: the Claude Code task list of each agent that is a row (`~/.claude/tasks/<session>/<n>.json`), subject per
   line with its state icon.
 

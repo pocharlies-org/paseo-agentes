@@ -113,10 +113,10 @@ export interface Workspace {
   readonly projectId: string;
   readonly status: "needs_input" | "failed" | "running" | "attention" | "done";
   readonly statusEnteredAt: string | null;
-  /** The clone root on the daemon host: what «Cambios» is read from. */
+  /** The clone root on the daemon host: the fallback when a workspace has no directory of its own. */
   readonly projectRootPath?: string;
-  /** Where the workspace's sessions run (a worktree path for worktree workspaces): what the transcript is found by. */
-  readonly workspaceDirectory?: string;
+  /** Where the workspace's sessions run (its worktree when it has one): what «Cambios» and the transcript are read by. */
+  readonly directory?: string;
 }
 
 // Paseo's urgency order (`STATUS_BUCKET_PRIORITY` in app utils/sidebar-agent-state.ts): what needs you first, then what

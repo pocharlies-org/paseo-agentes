@@ -9,9 +9,7 @@ import { vigilantes } from "./server/vigilantes.ts";
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(ajustesAgentes);
   server.handle(vigilantesList, async () => ({ sesiones: await vigilantes() }));
-  server.handle(cambiosList, async ({ rutas }) => ({
-    cambios: Object.fromEntries(await Promise.all(rutas.map(async (ruta) => [ruta, await cambios(ruta)]))),
-  }));
+  server.handle(cambiosList, async ({ rutas }) => ({ cambios: await cambios(rutas) }));
   server.handle(contextoList, async ({ sesiones }) => {
     const leidas = await Promise.all(
       sesiones.map(async (s) => [s.id, await tareas(s.id), await contexto(s.id, s.cwd)] as const),
