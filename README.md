@@ -22,7 +22,7 @@ Requires Paseo `>=0.11.2 <0.12.0`.
 
 ## Development
 
-`npm ci --ignore-scripts && npm run typecheck && npm test`. `scripts/deploy.sh` packs the trunk into
-`~/.local/share/paseo-agentes/paseo-plugin/<version>-<git sha>` and reloads the plugin on the local daemon.
+`npm ci --ignore-scripts && npm run typecheck && npm test`. `scripts/deploy.sh` updates the daemon's git checkout of this
+repo (the installed plugin) from trunk and reloads it on the local daemon.
 
 MIT licensed.
