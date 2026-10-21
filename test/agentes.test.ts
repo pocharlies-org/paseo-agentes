@@ -68,9 +68,11 @@ test("a stored fold is read back, and a broken or foreign one reads as nothing f
     proyectos: [],
     ocultos: ["prj_1"],
     filtro: [],
+    cambios: false,
+    tareas: false,
   });
   // Nothing stored, or a save from before "Terminado" existed (no `ocultos`): it starts folded.
-  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], proyectos: [], ocultos: [], filtro: [] };
+  const plegadoVacio = { bloque: false, grupos: ["terminado"], workspaces: [], proyectos: [], ocultos: [], filtro: [], cambios: false, tareas: false };
   for (const texto of [null, "", "{", "7", '"x"', '{"bloque":"si","grupos":"marcha"}', '{"bloque":false,"grupos":[]}']) {
     assert.deepEqual(leePlegado(texto), plegadoVacio);
   }
@@ -82,7 +84,11 @@ test("a stored fold is read back, and a broken or foreign one reads as nothing f
     proyectos: ["prj_1"],
     ocultos: [],
     filtro: ["enEjecucion"],
+    cambios: false,
+    tareas: false,
   });
+  // The panel sections fold too; a save from before them reads as open.
+  assert.equal(leePlegado('{"ocultos":[],"cambios":true}').cambios, true);
 });
 
 test("a project gets the letter and color of Paseo's workspace list", () => {

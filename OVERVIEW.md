@@ -83,12 +83,30 @@ per session: it scans `/proc` on Linux (~150 ms) and runs `lsof` asynchronously 
 subagents. A foreground command inside a live turn also holds the file, so it counts while the agent is running —
 which is already visible by its group.
 
+## The session's context, in the right panel (SC-2838)
+
+Like Claude Desktop's right panel, the Explorer panel adds two foldable sections under the agents, and each row carries
+its context:
+
+- **Tokens of context** at the end of each row (e.g. `117k`): what the last turn held, read from the session's
+  transcript (`~/.claude/projects/<cwd>/<session>.jsonl`, its last `usage`).
+- **Cambios**: the open PR of each worktree's branch with its GitHub Actions rollup (`repo #12 · title · 4/5` and a
+  colored dot: green, red, running, no checks) and the worktrees with no PR — found by the house convention
+  (`<clone>/.claude/worktrees/…`, `<clone>/.wt-…`) and resolved with `gh pr view --json statusCheckRollup`. Refreshed
+  per clone root every 60 s and on workspace changes.
+- **Tareas**: the Claude Code task list of each agent that is a row (`~/.claude/tasks/<session>/<n>.json`), subject per
+  line with its state icon.
+
+Both sections and the context tokens are read on the daemon host by the server part, on the same throttled reads; the
+sections only render in the Explorer panel (the left block stays as it was).
+
 ## Privacy
 
 Everything stays inside your Paseo daemon. The client subscribes to the agent list and the project list through the
-SDK (a snapshot plus one event per change, no polling) and listens to the subagent event. The server part only reads
-which files each process of the daemon's user has open (`/proc`, or `lsof` restricted to that user). It writes nothing to the daemon except its own
-settings document (the side), and calls nothing outside the daemon. Folding and hidden projects live in the
+SDK (a snapshot plus one event per change, no polling) and listens to the subagent event. The server part reads which
+files each process of the daemon's user has open (`/proc`, or `lsof` restricted to that user), the task lists and
+transcript tails under `~/.claude`, and asks GitHub through `gh` for the Cambios section. It writes nothing to the daemon except its own
+settings document (the side). Folding and hidden projects live in the
 client's `localStorage`.
 
 ## Install

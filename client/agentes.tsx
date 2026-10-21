@@ -27,7 +27,7 @@ import {
   type Workspace,
 } from "../shared/agentes.ts";
 import { ajustesAgentes, type Agrupar, type Lado, type Letra } from "../shared/ajustes.ts";
-import { vigilantesList } from "../shared/contract.ts";
+import { cambiosList, contextoList, type CambiosLinea, type EstadoCambios, type Tarea, vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
 
@@ -110,6 +110,12 @@ interface Foto {
   /** The daemon's workspace directory, by id: name, status and its time, for the workspace grouping. */
   readonly workspaces: ReadonlyMap<string, Workspace>;
   readonly proyectos: readonly Proyecto[];
+  /** Open PRs with their Actions rollup and worktrees without one, per clone root (the panel's «Cambios»). */
+  readonly cambios: Readonly<Record<string, readonly CambiosLinea[]>>;
+  /** The Claude Code task list per session id (the panel's «Tareas»). */
+  readonly tareas: Readonly<Record<string, readonly Tarea[]>>;
+  /** Context used by the last turn, in tokens, per session id. */
+  readonly contexto: Readonly<Record<string, number>>;
   readonly plegado: Plegado;
   readonly error: string | null;
 }
@@ -122,7 +128,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], cambios: {}, tareas: {}, contexto: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -206,6 +212,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           }
           muestraFilas();
           leeVigilantes();
+          leeContexto();
         },
         update: (message) => {
           if (message.type !== "agent_update") return;
@@ -221,6 +228,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           }
           muestraFilas();
           leeVigilantes();
+          leeContexto();
         },
       });
     })
@@ -234,12 +242,22 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   // The daemon's workspace directory — the same one that feeds Paseo's sidebar, with its own status and time per workspace.
   // shortcut: first page only, like the agents list; a host with more workspaces than one page holds is not this block's case.
   const trabajos = new Map<string, Workspace>();
-  const recorta = (w: { id: string; name: string; projectId: string; status: Workspace["status"]; statusEnteredAt: string | null }): Workspace => ({
+  const recorta = (w: {
+    id: string;
+    name: string;
+    projectId: string;
+    status: Workspace["status"];
+    statusEnteredAt: string | null;
+    projectRootPath?: string;
+    workspaceDirectory?: string;
+  }): Workspace => ({
     id: w.id,
     name: w.name,
     projectId: w.projectId,
     status: w.status,
     statusEnteredAt: w.statusEnteredAt,
+    projectRootPath: w.projectRootPath,
+    workspaceDirectory: w.workspaceDirectory,
   });
   let sueltaTrabajos: (() => void) | null = null;
   let suscripcionTrabajos: { release(): Promise<void> } | null = null;
@@ -253,6 +271,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           trabajos.clear();
           for (const w of entries) trabajos.set(w.id, recorta(w));
           publica({ workspaces: new Map(trabajos) });
+          leeCambios();
+          leeContexto();
         },
         update: (message) => {
           if (message.type !== "workspace_update") return;
@@ -260,6 +280,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           if (cambio.kind === "upsert") trabajos.set(cambio.workspace.id, recorta(cambio.workspace));
           else trabajos.delete(cambio.id);
           publica({ workspaces: new Map(trabajos) });
+          leeCambios();
+          leeContexto();
         },
       });
     })
@@ -293,6 +315,70 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     },
     error: falla,
   });
+
+  // Cambios and context have no events either: gh and the transcript are read on the daemon host with a throttle, like the watchers.
+  // shortcut: 60 s of freshness for the PRs (each gh call costs ~1 s); upgrade when the daemon learns to watch PRs.
+  let leyendoCambios = false;
+  let cambiosOtraVez = false;
+  const leeCambios = () => {
+    if (lifetime.signal.aborted) return;
+    if (leyendoCambios) {
+      cambiosOtraVez = true;
+      return;
+    }
+    leyendoCambios = true;
+    const rutas = [...new Set([...trabajos.values()].map((w) => w.projectRootPath).filter((r): r is string => !!r))];
+    void client
+      .rpc(cambiosList, { rutas })
+      // A gh failure leaves the last good list: the section is auxiliary and must not paint the block red.
+      .then(({ cambios }) => publica({ cambios }), () => {})
+      .finally(() =>
+        setTimeout(() => {
+          leyendoCambios = false;
+          if (cambiosOtraVez) {
+            cambiosOtraVez = false;
+            leeCambios();
+          }
+        }, 60_000),
+      );
+  };
+  const despiertaCambios = setInterval(leeCambios, 60_000);
+
+  let leyendoContexto = false;
+  let contextoOtraVez = false;
+  const leeContexto = () => {
+    if (lifetime.signal.aborted) return;
+    if (leyendoContexto) {
+      contextoOtraVez = true;
+      return;
+    }
+    const sesiones = [
+      ...new Map(
+        [...filas.values()]
+          .map((agente) => {
+            const id = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+            const ws = agente.workspaceId ? trabajos.get(agente.workspaceId) : undefined;
+            const cwd = ws?.workspaceDirectory ?? ws?.projectRootPath;
+            return id && cwd ? [id, { id, cwd }] : null;
+          })
+          .filter((s): s is [string, { id: string; cwd: string }] => s !== null),
+      ).values(),
+    ];
+    if (sesiones.length === 0) return;
+    leyendoContexto = true;
+    void client
+      .rpc(contextoList, { sesiones })
+      .then(({ tareas, contexto }) => publica({ tareas, contexto }), () => {})
+      .finally(() =>
+        setTimeout(() => {
+          leyendoContexto = false;
+          if (contextoOtraVez) {
+            contextoOtraVez = false;
+            leeContexto();
+          }
+        }, 5_000),
+      );
+  };
 
   const suscribe = (aviso: () => void) => {
     avisos.add(aviso);
@@ -359,7 +445,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   }
 
   function Bloque({ theme, host, abre, enPanel }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean }) {
-    const { agentes, subagentes, vigilantes, workspaces, proyectos, plegado, error } = useSyncExternalStore(suscribe, lee);
+    const { agentes, subagentes, vigilantes, workspaces, proyectos, cambios, tareas, contexto, plegado, error } = useSyncExternalStore(suscribe, lee);
     const ajustes = useSettings(ajustesAgentes);
     const modo: Agrupar = ajustes.status === "ready" ? ajustes.values.agrupar : "estado";
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
@@ -403,6 +489,15 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       }
       return [...conteo].sort(([, a], [, b]) => b - a);
     }, [todos]);
+    // The panel's extra sections: Cambios counts lines, Tareas counts tasks of the agents that are rows (not folded children).
+    const totalCambios = Object.values(cambios).reduce((numero, lineas) => numero + lineas.length, 0);
+    const sesionDe = (agente: Fila) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
+    const raices = useMemo(() => new Set(todos.flatMap((grupo) => grupo.agentes.map((agente) => agente.id))), [todos]);
+    const filasConTareas = useMemo(
+      () => agentes.filter((agente) => raices.has(agente.id) && (tareas[sesionDe(agente)]?.length ?? 0) > 0),
+      [agentes, raices, tareas],
+    );
+    const totalTareas = filasConTareas.reduce((numero, agente) => numero + (tareas[sesionDe(agente)]?.length ?? 0), 0);
     if (!error && todos.length === 0) {
       return enPanel ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>Ningún agente.</Text> : null;
     }
@@ -445,6 +540,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 // The time at the line's end: Paseo's row shows it for a running agent too, since its turn began; the rest, since it stopped talking.
                 const desde = grupo === "enEjecucion" ? agente.activeTurn?.startedAt ?? agente.updatedAt ?? terminos.get(agente.id) : terminos.get(agente.id);
                 const tiempo = hace(desde, Date.now());
+                // Tokens of context the last turn held (Claude Desktop shows the same on its session).
+                const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+                const tokens = sesion ? contexto[sesion] : undefined;
                 const fila = {
                   icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
                   label: agente.title ?? "Sin título",
@@ -452,6 +550,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   trailing: (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+                      {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
                       {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
                     </View>
                   ),
@@ -641,6 +740,62 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   );
                 })
               : grupos.map((grupo) => dibujaGrupo(grupo, 0))}
+            {enPanel && totalCambios > 0 ? (
+              <Seccion
+                titulo="Cambios"
+                total={totalCambios}
+                abierto={!plegado.cambios}
+                onPlegar={() => pliega({ ...plegado, cambios: !plegado.cambios })}
+                texto={texto}
+                linea={linea}
+                tenue={tenue}
+              >
+                {Object.entries(cambios)
+                  .filter(([, lineas]) => lineas.length > 0)
+                  .map(([ruta, lineas]) => (
+                    <Fragment key={ruta}>
+                      <Text style={[texto, { paddingLeft: 28, paddingTop: 2 }]} numberOfLines={1}>
+                        {ruta.split("/").filter(Boolean).at(-1) ?? ruta}
+                      </Text>
+                      {lineas.map((cambio, i) => (
+                        <View key={`${ruta}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: hueco, paddingLeft: 40, paddingRight: 16, paddingVertical: 2 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colorDe(GRUPO_DEL_CAMBIO[cambio.estado], theme) }} />
+                          <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
+                            {cambio.texto}
+                          </Text>
+                        </View>
+                      ))}
+                    </Fragment>
+                  ))}
+              </Seccion>
+            ) : null}
+            {enPanel && totalTareas > 0 ? (
+              <Seccion
+                titulo="Tareas"
+                total={totalTareas}
+                abierto={!plegado.tareas}
+                onPlegar={() => pliega({ ...plegado, tareas: !plegado.tareas })}
+                texto={texto}
+                linea={linea}
+                tenue={tenue}
+              >
+                {filasConTareas.map((agente) => (
+                  <Fragment key={agente.id}>
+                    <Text style={[texto, { paddingLeft: 28, paddingTop: 2 }]} numberOfLines={1}>
+                      {agente.title ?? "Sin título"}
+                    </Text>
+                    {(tareas[sesionDe(agente)] ?? []).map((tarea, i) => (
+                      <View key={`${agente.id}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: hueco, paddingLeft: 40, paddingRight: 16, paddingVertical: 2 }}>
+                        <Icon name={ICONO_TAREA[tarea.status]} size={12} color={tenue} />
+                        <Text style={[texto, { flex: 1 }]} numberOfLines={2}>
+                          {tarea.subject}
+                        </Text>
+                      </View>
+                    ))}
+                  </Fragment>
+                ))}
+              </Seccion>
+            ) : null}
           </ScrollView>
         )}
       </View>
@@ -653,6 +808,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   client.addSettingsScreen({ id: "ajustes", title: "Ajustes", icon: "Settings", Component: AjustesAgentes });
   return () => {
     lifetime.abort();
+    void clearInterval(despiertaCambios);
     sueltaProyectos();
     sueltaTrabajos?.();
     void suscripcionTrabajos?.release();
@@ -675,6 +831,39 @@ const LETRAS = [
   { label: "Grande", value: "grande" },
   { label: "Muy grande", value: "muyGrande" },
 ];
+
+// A foldable panel section with a header like the status groups' (Cambios and Tareas, SC-2838).
+function Seccion({ titulo, total, abierto, onPlegar, texto, linea, tenue, children }: {
+  titulo: string;
+  total: number;
+  abierto: boolean;
+  onPlegar(): void;
+  texto: { color: string; fontSize: number };
+  linea: object;
+  tenue: string;
+  children: React.ReactNode;
+}) {
+  const Flecha = abierto ? ABIERTO : CERRADO;
+  return (
+    <Fragment>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: abierto }} onPress={onPlegar} style={[linea, { paddingRight: 16 }]}>
+        <Flecha size={12} color={tenue} />
+        <Text style={[texto, { flex: 1 }]}>{`${titulo} · ${total}`}</Text>
+      </Pressable>
+      {abierto ? children : null}
+    </Fragment>
+  );
+}
+
+// A Cambios state read as one of the block's groups, so its dot reuses Paseo's palette.
+const GRUPO_DEL_CAMBIO: Record<EstadoCambios, Grupo> = {
+  verde: "paraRevisar",
+  roja: "conError",
+  marcha: "enEjecucion",
+  sinChecks: "terminado",
+  sinPr: "terminado",
+};
+const ICONO_TAREA: Record<Tarea["status"], string> = { pending: "Circle", in_progress: "CircleDot", completed: "Check" };
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
 function FilaPanel({ icon: Icono, label, onPress, trailing, color, tam = 13 }: { icon: Dibujo; label: string; onPress(): void; trailing: React.ReactNode; color: string; tam?: number }) {
