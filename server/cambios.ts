@@ -29,21 +29,24 @@ async function lineaDe(dir: string): Promise<(CambiosLinea & { clave: string }) 
   const repo = url?.replace(/^.*[/:]/, "").replace(/\.git$/, "");
   if (!repo) return null;
   const salida = await sale("gh", ["pr", "view", "--json", "number,title,statusCheckRollup"], dir);
-  if (!salida) return { texto: `${repo} · ${branch}`, estado: "sinPr", clave: `sinPr:${repo}:${branch}` };
+  if (!salida) return { texto: `${repo} · ${branch}`, estado: "sinPr", rutas: [dir], clave: `sinPr:${repo}:${branch}` };
   let pr: { number: number; title: string; statusCheckRollup?: unknown };
   try {
     pr = JSON.parse(salida);
   } catch {
-    return { texto: `${repo} · ${branch}`, estado: "sinPr", clave: `sinPr:${repo}:${branch}` };
+    return { texto: `${repo} · ${branch}`, estado: "sinPr", rutas: [dir], clave: `sinPr:${repo}:${branch}` };
   }
   const { estado, ok, total } = estadoRollup(pr.statusCheckRollup);
-  return { texto: `${repo} #${pr.number} · ${pr.title.slice(0, 60)} · ${ok}/${total}`, estado, clave: `pr:${repo}#${pr.number}` };
+  return { texto: `${repo} #${pr.number} · ${pr.title.slice(0, 60)} · ${ok}/${total}`, estado, rutas: [dir], clave: `pr:${repo}#${pr.number}` };
 }
 
-/** One line per workspace directory (deduped: two workspaces on the same branch are the same PR); unreadable ones give nothing. */
+/** One line per workspace directory (deduped: two workspaces on the same branch are the same PR, with both rutas); unreadable ones give nothing. */
 export async function cambios(rutas: readonly string[]): Promise<CambiosLinea[]> {
   const lineas = (await Promise.all(rutas.map(lineaDe))).filter((l): l is CambiosLinea & { clave: string } => l !== null);
   const porClave = new Map<string, CambiosLinea>();
-  for (const { clave, ...linea } of lineas) porClave.set(clave, linea);
+  for (const { clave, rutas: rutasDeLinea, ...linea } of lineas) {
+    const previa = porClave.get(clave);
+    porClave.set(clave, previa ? { ...linea, rutas: [...new Set([...previa.rutas, ...rutasDeLinea])] } : { ...linea, rutas: rutasDeLinea });
+  }
   return [...porClave.values()];
 }

@@ -406,8 +406,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   }
 
   // Panels get navigation, so a row opens its agent directly.
-  function PanelAgentes({ theme, host, navigation }: PluginWorkspacePanelProps) {
-    return <Bloque theme={theme} host={host} abre={(agentId) => navigation?.openAgent({ agentId })} enPanel />;
+  function PanelAgentes({ theme, host, navigation, workspaceId }: PluginWorkspacePanelProps) {
+    return <Bloque theme={theme} host={host} abre={(agentId) => navigation?.openAgent({ agentId })} enPanel workspaceId={workspaceId} />;
   }
 
   function AjustesAgentes({ theme }: PluginSurfaceProps) {
@@ -450,7 +450,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     );
   }
 
-  function Bloque({ theme, host, abre, enPanel }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean }) {
+  function Bloque({ theme, host, abre, enPanel, workspaceId }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean; workspaceId?: string }) {
     const { agentes, subagentes, vigilantes, workspaces, proyectos, cambios, tareas, contexto, plegado, error } = useSyncExternalStore(suscribe, lee);
     const ajustes = useSettings(ajustesAgentes);
     const modo: Agrupar = ajustes.status === "ready" ? ajustes.values.agrupar : "estado";
@@ -495,12 +495,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       }
       return [...conteo].sort(([, a], [, b]) => b - a);
     }, [todos]);
-    // The panel's extra sections: Tareas counts tasks of the agents that are rows (not folded children).
+    // The panel's extra sections belong to the workspace the panel is open on (SC-2864): all hosts' 600+ tasks are noise.
     const sesionDe = (agente: Fila) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
+    const cambiosDelWorkspace = useMemo(() => {
+      const ws = workspaceId ? workspaces.get(workspaceId) : undefined;
+      const dir = ws?.directory ?? ws?.projectRootPath;
+      return dir ? cambios.filter((cambio) => cambio.rutas.includes(dir)) : [];
+    }, [workspaceId, workspaces, cambios]);
     const raices = useMemo(() => new Set(todos.flatMap((grupo) => grupo.agentes.map((agente) => agente.id))), [todos]);
     const filasConTareas = useMemo(
-      () => agentes.filter((agente) => raices.has(agente.id) && (tareas[sesionDe(agente)]?.length ?? 0) > 0),
-      [agentes, raices, tareas],
+      () => agentes.filter((agente) => raices.has(agente.id) && agente.workspaceId === workspaceId && (tareas[sesionDe(agente)]?.length ?? 0) > 0),
+      [agentes, raices, tareas, workspaceId],
     );
     const totalTareas = filasConTareas.reduce((numero, agente) => numero + (tareas[sesionDe(agente)]?.length ?? 0), 0);
     if (!error && todos.length === 0) {
@@ -745,17 +750,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   );
                 })
               : grupos.map((grupo) => dibujaGrupo(grupo, 0))}
-            {enPanel && cambios.length > 0 ? (
+            {enPanel && cambiosDelWorkspace.length > 0 ? (
               <Seccion
                 titulo="Cambios"
-                total={cambios.length}
+                total={cambiosDelWorkspace.length}
                 abierto={!plegado.cambios}
                 onPlegar={() => pliega({ ...plegado, cambios: !plegado.cambios })}
                 texto={texto}
                 linea={linea}
                 tenue={tenue}
               >
-                {cambios.map((cambio, i) => (
+                {cambiosDelWorkspace.map((cambio, i) => (
                   <View key={`${cambio.texto}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: hueco, paddingLeft: 28, paddingRight: 16, paddingVertical: 2 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colorDe(GRUPO_DEL_CAMBIO[cambio.estado], theme) }} />
                     <Text style={[texto, { flex: 1 }]} numberOfLines={1}>
