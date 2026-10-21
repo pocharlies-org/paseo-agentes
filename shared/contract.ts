@@ -11,10 +11,11 @@ export const vigilantesList = defineRpc({
 export const EstadoCambios = z.enum(["verde", "roja", "marcha", "sinChecks", "sinPr"]);
 export type EstadoCambios = z.infer<typeof EstadoCambios>;
 
-/** One line of the «Cambios» list: `repo #num · título · ok/total` (or `repo · rama` without a PR). */
+/** One line of the «Cambios» list: `repo #num · título · ok/total` (or `repo · rama` without a PR), with the workspace directories that produced it (the panel shows only its own). */
 export const CambiosLineaSchema = z.object({
   texto: z.string(),
   estado: EstadoCambios,
+  rutas: z.array(z.string()),
 });
 export type CambiosLinea = z.infer<typeof CambiosLineaSchema>;
 

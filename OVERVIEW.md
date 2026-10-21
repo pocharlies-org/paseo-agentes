@@ -86,16 +86,17 @@ which is already visible by its group.
 ## The session's context, in the right panel (SC-2838)
 
 Like Claude Desktop's right panel, the Explorer panel adds two foldable sections under the agents, and each row carries
-its context:
+its context. Both sections show only the workspace the panel is open on (SC-2864) — the whole host's hundreds of tasks
+are noise:
 
 - **Tokens of context** at the end of each row (e.g. `117k`): what the last turn held, read from the session's
   transcript (`~/.claude/projects/<cwd>/<session>.jsonl`, its last `usage`).
-- **Cambios**: the open PR of each workspace's branch with its GitHub Actions rollup (`repo #12 · title · 4/5` and a
+- **Cambios**: the open PR of the workspace's branch with its GitHub Actions rollup (`repo #12 · title · 4/5` and a
   colored dot: green, red, running, no checks), or `repo · branch` when the branch has no PR — resolved with
-  `gh pr view --json statusCheckRollup`, one call per workspace (two workspaces on the same branch are one line).
-  Refreshed every 60 s and on workspace changes.
-- **Tareas**: the Claude Code task list of each agent that is a row (`~/.claude/tasks/<session>/<n>.json`), subject per
-  line with its state icon.
+  `gh pr view --json statusCheckRollup`, one call per workspace directory (two workspaces on the same branch are one
+  line, and each line carries the directories it came from). Refreshed every 60 s and on workspace changes.
+- **Tareas**: the Claude Code task list of the workspace's agents that are rows (`~/.claude/tasks/<session>/<n>.json`),
+  subject per line with its state icon.
 
 Both sections and the context tokens are read on the daemon host by the server part, on the same throttled reads; the
 sections only render in the Explorer panel (the left block stays as it was).
