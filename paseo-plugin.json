@@ -2,5 +2,5 @@
   "id": "paseo-agentes",
   "name": "Agentes por estado",
   "description": "Los agentes de todos los workspaces que te preguntan, los que están en marcha y los que acabaron sin que los vieras; por estado o por proyecto → workspace → estado → agentes; una fila abre su agente. Se ve a la izquierda (barra lateral) o a la derecha (panel del Explorer): elígelo en ⋯ → Ajustes.",
-  "requirements": { "paseo": ">=0.11.2 <0.13.0" }
+  "requirements": { "paseo": ">=0.11.2 <0.14.0" }
 }
