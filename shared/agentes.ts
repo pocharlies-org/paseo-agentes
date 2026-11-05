@@ -29,6 +29,9 @@ const TITULOS: Record<Grupo, string> = {
 };
 const GRUPOS = Object.keys(TITULOS) as Grupo[];
 
+/** La vista simple «Solo lo que te espera»: lo que espera a una persona, en orden de urgencia; en marcha y ya visto quedan fuera. */
+export const ESPERA: readonly Grupo[] = ["necesitaDatos", "conError", "paraRevisar"];
+
 /**
  * Paseo's own precedence (`deriveAgentStateBucket` of its protocol): data it needs beats an error, which beats a running
  * turn, which beats an end nobody has opened yet; everything else is done. `requiresAttention` is cleared by Paseo when

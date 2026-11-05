@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, ESPERA, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -45,6 +45,17 @@ test("groups come in order, empty ones are left out, and the newest is first", (
       ["Terminado", ["visto"]],
     ],
   );
+});
+
+test("the simple view keeps only what waits for a person: no running, no already-seen", () => {
+  const grupos = agrupar([
+    agente("visto"),
+    agente("marcha", { status: "running" }),
+    agente("acabado", { requiresAttention: true, attentionTimestamp: "2026-10-13T11:00:00.000Z" }),
+    agente("roto", { status: "error" }),
+    agente("pregunta", { pendingPermissions: [{}] }),
+  ]).filter(({ grupo }) => ESPERA.includes(grupo));
+  assert.deepEqual(grupos.map(({ grupo }) => grupo), ["necesitaDatos", "conError", "paraRevisar"]);
 });
 
 test("a turn end reads as one word, and nothing reads as nothing", () => {
