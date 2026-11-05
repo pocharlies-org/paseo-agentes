@@ -14,6 +14,7 @@ import { Animated, Easing, Platform, Pressable, ScrollView, Text, useWindowDimen
 import {
   agrupar,
   enMarchaPorFila,
+  ESPERA,
   hace,
   insignias,
   leePlegado,
@@ -54,6 +55,10 @@ const ICONO_SIN_PROYECTO = icono("Circle");
 // The header's quick switch: the icon shows the grouping you get when you press it.
 const ICONO_GRUPOS = icono("Layers");
 const ICONO_ESTADO = icono("List");
+const ICONO_ESPERA = icono("Inbox");
+// The three views cycle with the header's switch button.
+const SIGUIENTE: Record<Agrupar, Agrupar> = { estado: "workspace", workspace: "espera", espera: "estado" };
+const NOMBRE_MODO: Record<Agrupar, string> = { estado: "Por estado", workspace: "Por proyecto", espera: "Solo lo que te espera" };
 // Fold everything under a header at once.
 const TODO_CERRADO = icono("ChevronsDownUp");
 const TODO_ABIERTO = icono("ChevronsUpDown");
@@ -474,7 +479,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       () => todos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0),
       [todos, plegado.ocultos],
     );
-    const grupos = useMemo(() => filtrar(gruposVisibles), [gruposVisibles, plegado.filtro]);
+    // La vista «espera» fuerza su propio filtro: solo lo que espera a una persona, sin árbol ni fichas.
+    const grupos = useMemo(
+      () => (modo === "espera" ? gruposVisibles.filter((grupo) => ESPERA.includes(grupo.grupo)) : filtrar(gruposVisibles)),
+      [gruposVisibles, plegado.filtro, modo],
+    );
     const porProy = useMemo(
       () =>
         porProyecto(agentes, subagentes, workspaces, proyectos)
@@ -520,7 +529,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const sangria = { paddingLeft: 16, paddingTop: aire, paddingBottom: Math.max(2, aire - 4) };
     const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: hueco } as const;
     const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
-    const Cambio = modo === "estado" ? ICONO_GRUPOS : ICONO_ESTADO;
+    const Cambio = modo === "estado" ? ICONO_GRUPOS : modo === "workspace" ? ICONO_ESPERA : ICONO_ESTADO;
     // «Plegar/desplegar todas»: the ids of the headers that exist now. Group folding stays global, as a group header's own fold is.
     const idsWs = [...new Set(porProy.flatMap(({ workspaces }) => workspaces.map(({ workspace }) => workspace?.id ?? "")))];
     const idsProy = [...new Set(porProy.map(({ proyecto }) => proyecto?.projectId ?? ""))];
@@ -639,7 +648,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         >
           <Pliegue size={12} color={tenue} />
           <Text style={[texto, { flex: 1 }]}>Agentes</Text>
-          {gruposVisibles.map(({ grupo, titulo, agentes }) => {
+          {(modo === "espera" ? grupos : gruposVisibles).map(({ grupo, titulo, agentes }) => {
             const Simbolo = ICONOS[grupo];
             const activo = plegado.filtro.includes(grupo);
             return (
@@ -663,9 +672,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           {ajustes.status === "ready" ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={modo === "estado" ? "Agrupar por proyecto" : "Agrupar por estado"}
+              accessibilityLabel={`Cambiar a ${NOMBRE_MODO[SIGUIENTE[modo]]}`}
               hitSlop={6}
-              onPress={() => void ajustes.save({ ...ajustes.values, agrupar: modo === "estado" ? "workspace" : "estado" }, ajustes.revision)}
+              onPress={() => void ajustes.save({ ...ajustes.values, agrupar: SIGUIENTE[modo] }, ajustes.revision)}
               style={{ marginLeft: 8 }}
             >
               <Cambio size={12} color={tenue} />
@@ -675,6 +684,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         {error ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
         {plegado.bloque ? null : (
           <ScrollView style={enPanel ? { flex: 1 } : { maxHeight: Math.round(height * 0.6) }}>
+            {modo === "espera" ? null : (
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingLeft: 16, paddingTop: 4, paddingBottom: 4 }}>
               {fichas.map(([projectId, numero]) => {
                 const insignia = iconos.get(projectId);
@@ -698,6 +708,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 );
               })}
             </View>
+            )}
+            {modo === "espera" && grupos.length === 0 ? <Text style={[texto, sangria]}>Nada te espera.</Text> : null}
             {modo === "workspace"
               ? porProy.map(({ proyecto, workspaces: wss }) => {
                   const id = proyecto?.projectId ?? "";
@@ -824,6 +836,7 @@ const LADOS = [
 const AGRUPACIONES = [
   { label: "Por estado: necesita datos, en ejecución…", value: "estado" },
   { label: "Proyecto → workspace → estado → agentes", value: "workspace" },
+  { label: "Solo lo que te espera: preguntas, errores y para revisar", value: "espera" },
 ];
 
 const LETRAS = [

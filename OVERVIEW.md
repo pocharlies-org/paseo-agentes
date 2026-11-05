@@ -29,7 +29,7 @@ the running→idle moment caught live after that, so it survives opening the age
 nothing until its next turn ends — the daemon keeps no finished-at time. The "Agentes" header folds and unfolds the whole block — folded, it leaves a single line with
 one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
 only your interactive sessions, or only Hermes. The header's counters are filters: pressing one shows only that group
-(press again to clear), and the icon at the end of the header switches the grouping (state ↔ project), the same value
+(press again to clear), and the icon at the end of the header cycles the grouping (state → project → waiting), the same value
 as «Cómo se agrupa» in Ajustes. Two more arrows fold or unfold everything at once: on the block header (projects,
 workspaces and groups), on a project header (its workspaces) and on a workspace header (its groups). Folding, hidden
 projects and the group filter persist per client. Next to those arrows, a `+` on a workspace header creates a new agent
@@ -50,6 +50,14 @@ indented under it, and the agent rows under those. Workspaces come most urgent f
 attention, done), newest status first inside a rank; an agent whose workspace the daemon has not described sits behind
 all described ones. Each header folds its branch; the folds persist like the rest. In this grouping a row's leading
 glyph is the status indicator, not the project badge — the headers already say where the agent is.
+
+## Only what waits for you
+
+The third «Cómo se agrupa» value, **Solo lo que te espera**, is the simple view: a flat list of the agents that wait for
+a person — *necesita datos*, *con error* and *para revisar* (where a «PARA DANI:» lands), in that urgency order — with
+the running and already-seen agents filtered out and no project tree or chips. Empty, it says «Nada te espera.».
+shortcut: opening a waiting agent marks it as seen, so it leaves the list even if you have not answered yet; upgrade
+when the daemon carries a "answered" state.
 
 ## Left or right, configurable
 
