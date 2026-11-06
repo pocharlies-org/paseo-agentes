@@ -57,7 +57,9 @@ The third «Cómo se agrupa» value, **Solo lo que te espera**, is the simple vi
 waiting for a person — those with a pending question or permission, those that failed, and those whose last turn ended
 with a «PARA DANI:» line that has no reply of yours after it (the marker is read from the session transcript on the
 daemon host, like the context tokens; it is the house's law for "waiting on Dani"). Running agents are filtered out,
-and opening one does not take it off the list — only answering does. Empty, it says «Nada te espera.». The project
+and opening one does not take it off the list — only answering does. Each row shows its workspace and how long it has
+been waiting (no context tokens here — what matters is who waits, from where, and since when), and rows are ordered by
+the moment the wait began. Empty, it says «Nada te espera.». The project
 chips and the header's group filters do not apply here (nothing waiting can be hidden by them), and the panel's
 «Cambios» and «Tareas» sections are not drawn in this view.
 shortcut: only «PARA DANI:» counts, read from the last 64 KiB of the transcript; a session that stops with a plain

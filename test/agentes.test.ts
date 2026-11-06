@@ -47,23 +47,27 @@ test("groups come in order, empty ones are left out, and the newest is first", (
   );
 });
 
-test("the waiting view lists questions, errors and unanswered «PARA DANI:», most urgent first", () => {
+test("the waiting view lists questions, errors and unanswered «PARA DANI:», each class newest-wait first", () => {
   const filas = filasEspera(
     [
       agente("visto"),
       agente("marcha", { status: "running", persistence: { sessionId: "s-marcha" } }),
-      agente("paradani", { persistence: { sessionId: "s-dani" }, attentionTimestamp: "2026-10-13T11:00:00.000Z" }),
+      agente("paradani-viejo", { persistence: { sessionId: "s-viejo" }, createdAt: "2026-10-11T10:00:00.000Z" }),
+      agente("paradani-nuevo", { persistence: { sessionId: "s-nuevo" }, createdAt: "2026-10-10T10:00:00.000Z" }),
       agente("roto", { status: "error" }),
-      agente("pregunta", { pendingPermissions: [{}], attentionTimestamp: "2026-10-13T08:00:00.000Z" }),
+      agente("pregunta", { pendingPermissions: [{}] }),
     ],
-    new Set(["s-dani", "s-marcha"]),
+    new Set(["s-viejo", "s-nuevo", "s-marcha"]),
+    // El orden de la clase es por el momento en que empezó la espera, no por la creación (el nuevo esperaba antes creado hace más).
+    (a) => ({ "paradani-viejo": "2026-10-13T09:00:00.000Z", "paradani-nuevo": "2026-10-13T11:00:00.000Z" })[a.id] ?? a.createdAt,
   );
   assert.deepEqual(
     filas.map(({ agente, grupo }) => [agente.id, grupo]),
     [
       ["pregunta", "necesitaDatos"],
       ["roto", "conError"],
-      ["paradani", "paraRevisar"],
+      ["paradani-nuevo", "paraRevisar"],
+      ["paradani-viejo", "paraRevisar"],
     ],
   );
 });

@@ -114,6 +114,8 @@ export function agrupar<T extends Agente>(
 export function filasEspera<T extends Agente>(
   agentes: readonly T[],
   sesionesEnEspera: ReadonlySet<string>,
+  // El orden es por el momento en que empezó la espera (el cliente pasa su tiempo visto), no por la creación del agente.
+  desde: (agente: T) => string | null = (a) => a.attentionTimestamp ?? a.createdAt,
 ): { agente: T; grupo: Grupo }[] {
   const { filas } = filasDe(agentes, new Set());
   const marcas: readonly Grupo[] = ["necesitaDatos", "conError", "paraRevisar"];
@@ -132,8 +134,7 @@ export function filasEspera<T extends Agente>(
     .filter((fila): fila is { agente: T; grupo: Grupo } => fila !== null)
     .sort(
       (a, b) =>
-        marcas.indexOf(a.grupo) - marcas.indexOf(b.grupo) ||
-        (b.agente.attentionTimestamp ?? b.agente.createdAt).localeCompare(a.agente.attentionTimestamp ?? a.agente.createdAt),
+        marcas.indexOf(a.grupo) - marcas.indexOf(b.grupo) || (desde(b.agente) ?? "").localeCompare(desde(a.agente) ?? ""),
     );
 }
 
