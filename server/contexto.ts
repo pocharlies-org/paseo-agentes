@@ -1,4 +1,4 @@
-import { open, readdir, readFile } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Espera, Tarea } from "../shared/contract.ts";
@@ -46,9 +46,29 @@ export function tokensDeContexto(suelta: string): number | null {
   return null;
 }
 
-/** Reads the tail of the session's JSONL (the last turn is all that is needed); null if the file is not where the cwd says. */
+/**
+ * Where the session's JSONL is: under its workspace directory, or — when the session runs elsewhere (a company session
+ * lives in a Paseo category folder but runs in ~/compania) — under whichever project holds that session id, which is unique.
+ */
+async function rutaDe(sesion: string, cwd: string, proyectos: string): Promise<string | null> {
+  const directa = join(proyectos, cwd.replace(/\//g, "-"), `${sesion}.jsonl`);
+  try {
+    await stat(directa);
+    return directa;
+  } catch {
+    // shortcut: one readdir of ~/.claude/projects per miss; cache it if the host grows past a few hundred projects.
+    for (const carpeta of await readdir(proyectos).catch(() => [] as string[])) {
+      const ruta = join(proyectos, carpeta, `${sesion}.jsonl`);
+      if (await stat(ruta).then(() => true, () => false)) return ruta;
+    }
+    return null;
+  }
+}
+
+/** Reads the tail of the session's JSONL (the last turn is all that is needed); null if there is none. */
 export async function lectura(sesion: string, cwd: string, proyectos = join(homedir(), ".claude", "projects")): Promise<string | null> {
-  const ruta = join(proyectos, cwd.replace(/\//g, "-"), `${sesion}.jsonl`);
+  const ruta = await rutaDe(sesion, cwd, proyectos);
+  if (!ruta) return null;
   try {
     const fh = await open(ruta, "r");
     try {
