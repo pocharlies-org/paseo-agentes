@@ -20,6 +20,7 @@ import {
   insignias,
   leePlegado,
   porProyecto,
+  sesionDe,
   type Agente,
   type EnMarcha,
   type Grupo,
@@ -372,7 +373,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       ...new Map(
         [...filas.values()]
           .map((agente) => {
-            const id = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+            const id = sesionDe(agente);
             const ws = agente.workspaceId ? trabajos.get(agente.workspaceId) : undefined;
             const cwd = ws?.directory ?? ws?.projectRootPath;
             return id && cwd ? [id, { id, cwd }] : null;
@@ -516,7 +517,6 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       return [...conteo].sort(([, a], [, b]) => b - a);
     }, [todos]);
     // The panel's extra sections belong to the workspace the panel is open on (SC-2864): all hosts' 600+ tasks are noise.
-    const sesionDe = (agente: Fila) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
     const cambiosDelWorkspace = useMemo(() => {
       const ws = workspaceId ? workspaces.get(workspaceId) : undefined;
       const dir = ws?.directory ?? ws?.projectRootPath;
@@ -571,7 +571,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 const desde = grupo === "enEjecucion" ? agente.activeTurn?.startedAt ?? agente.updatedAt ?? terminos.get(agente.id) : terminos.get(agente.id);
                 const tiempo = hace(desde, Date.now());
                 // Tokens of context the last turn held (Claude Desktop shows the same on its session).
-                const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+                const sesion = sesionDe(agente);
                 const tokens = sesion ? contexto[sesion] : undefined;
                 const fila = {
                   icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
@@ -653,7 +653,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     // Fila de la vista «espera»: sin cabeceras de grupo; el icono dice qué espera (SC-4703).
     const filaDe = (agente: Fila, grupo: Grupo) => {
       const tiempo = hace(terminos.get(agente.id), Date.now());
-      const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+      const sesion = sesionDe(agente);
       const tokens = sesion ? contexto[sesion] : undefined;
       const fila = {
         icon: ICONOS[grupo],
