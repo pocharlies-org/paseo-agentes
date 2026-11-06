@@ -19,7 +19,7 @@ The buckets and names are Paseo's own (`deriveAgentStateBucket`, in the same ord
 | En ejecución | a turn is running |
 | Terminado | seen, nothing pending — folded by default so it does not flood the sidebar |
 
-Empty groups are not rendered; with nothing pending the block takes no space. Inside a group, newest first, by a
+Empty groups are not rendered; with no agents at all the block takes no space. Inside a group, newest first, by a
 timestamp that does not change while the agent emits — rows do not jump under the pointer.
 
 Each row carries its project's icon, painted the way Paseo's workspace list paints it (initial on its color, same
@@ -29,7 +29,7 @@ the running→idle moment caught live after that, so it survives opening the age
 nothing until its next turn ends — the daemon keeps no finished-at time. The "Agentes" header folds and unfolds the whole block — folded, it leaves a single line with
 one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
 only your interactive sessions, or only Hermes. The header's counters are filters: pressing one shows only that group
-(press again to clear), and the icon at the end of the header cycles the grouping (state → project → waiting), the same value
+(press again to clear; in the waiting view the count is static), and the icon at the end of the header cycles the grouping (state → project → waiting), the same value
 as «Cómo se agrupa» in Ajustes. Two more arrows fold or unfold everything at once: on the block header (projects,
 workspaces and groups), on a project header (its workspaces) and on a workspace header (its groups). Folding, hidden
 projects and the group filter persist per client. Next to those arrows, a `+` on a workspace header creates a new agent
@@ -53,11 +53,15 @@ glyph is the status indicator, not the project badge — the headers already say
 
 ## Only what waits for you
 
-The third «Cómo se agrupa» value, **Solo lo que te espera**, is the simple view: a flat list of the agents that wait for
-a person — *necesita datos*, *con error* and *para revisar* (where a «PARA DANI:» lands), in that urgency order — with
-the running and already-seen agents filtered out and no project tree or chips. Empty, it says «Nada te espera.».
-shortcut: opening a waiting agent marks it as seen, so it leaves the list even if you have not answered yet; upgrade
-when the daemon carries a "answered" state.
+The third «Cómo se agrupa» value, **Solo lo que te espera**, is the simple view: a flat list of exactly the agents
+waiting for a person — those with a pending question or permission, those that failed, and those whose last turn ended
+with a «PARA DANI:» line that has no reply of yours after it (the marker is read from the session transcript on the
+daemon host, like the context tokens; it is the house's law for "waiting on Dani"). Running agents are filtered out,
+and opening one does not take it off the list — only answering does. Empty, it says «Nada te espera.». The project
+chips and the header's group filters do not apply here (nothing waiting can be hidden by them), and the panel's
+«Cambios» and «Tareas» sections are not drawn in this view.
+shortcut: only «PARA DANI:» counts, read from the last 64 KiB of the transcript; a session that stops with a plain
+question and no marker is not listed. Upgrade when the daemon carries an "answered" state.
 
 ## Left or right, configurable
 
@@ -124,7 +128,7 @@ client's `localStorage`.
 paseo plugin add pocharlies-org/paseo-agentes
 ```
 
-or pick it in the Paseo plugin registry. Requires Paseo `>=0.11.2 <0.12.0`. The UI strings are currently Spanish
+or pick it in the Paseo plugin registry. Requires Paseo `>=0.11.2 <0.13.0`. The UI strings are currently Spanish
 (they are Paseo's own status names); the plugin works the same in any locale.
 
 ## Development

@@ -3,9 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { contexto, tareas, tokensDeContexto } from "../server/contexto.ts";
+import { contexto, esperaDeDani, tareas, tokensDeContexto } from "../server/contexto.ts";
 
 const sesion = "0f0e0d0c-0b0a-4908-8706-050403020100";
+
+test("«PARA DANI:» waits until a real answer arrives; a tool result is not an answer", () => {
+  const asis = (text: string) => JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text }] } });
+  const usuario = (content: unknown) => JSON.stringify({ message: { role: "user", content } });
+  assert.equal(esperaDeDani([usuario("haz X"), asis("Listo.\nPARA DANI: ¿apruebo?")].join("\n")), true);
+  assert.equal(esperaDeDani([usuario("haz X"), asis("PARA DANI: ¿apruebo?"), usuario("sí")].join("\n")), false);
+  assert.equal(esperaDeDani([asis("PARA DANI: ¿apruebo?"), usuario([{ type: "tool_result", content: "ok" }])].join("\n")), true);
+  assert.equal(esperaDeDani([usuario("haz X"), asis("Listo.")].join("\n")), false);
+  assert.equal(esperaDeDani("línea rota\n{no es json"), false);
+});
 
 test("the task list is read ordered and with its statuses; a session without directory has none", async () => {
   const raiz = mkdtempSync(join(mkdtempSync("/tmp/"), "tasks-"));

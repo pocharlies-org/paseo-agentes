@@ -14,7 +14,8 @@ import { Animated, Easing, Platform, Pressable, ScrollView, Text, useWindowDimen
 import {
   agrupar,
   enMarchaPorFila,
-  ESPERA,
+  filasEspera,
+  grupoDe,
   hace,
   insignias,
   leePlegado,
@@ -121,6 +122,8 @@ interface Foto {
   readonly tareas: Readonly<Record<string, readonly Tarea[]>>;
   /** Context used by the last turn, in tokens, per session id. */
   readonly contexto: Readonly<Record<string, number>>;
+  /** Sessions whose last turn left a «PARA DANI:» unanswered (the daemon read the transcript), by session id. */
+  readonly espera: Readonly<Record<string, boolean>>;
   readonly plegado: Plegado;
   readonly error: string | null;
 }
@@ -133,7 +136,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], cambios: [], tareas: {}, contexto: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], cambios: [], tareas: {}, contexto: {}, espera: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -379,7 +382,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     leyendoContexto = true;
     void client
       .rpc(contextoList, { sesiones })
-      .then(({ tareas, contexto }) => publica({ tareas, contexto }), () => {})
+      .then(({ tareas, contexto, espera }) => publica({ tareas, contexto, espera }), () => {})
       .finally(() =>
         setTimeout(() => {
           leyendoContexto = false;
@@ -435,7 +438,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           />
           <SettingsSelect
             label="Cómo se agrupa"
-            hint="Cuatro niveles: proyecto, workspace (con su estado y su hora), grupo de estado y agentes, como la barra lateral de Paseo"
+            hint="Tres vistas: por estado, el árbol proyecto → workspace → estado → agentes, o la lista simple de lo que te espera (preguntas, errores y «PARA DANI:» sin responder)"
             value={ajustes.status === "ready" ? ajustes.values.agrupar : "estado"}
             options={AGRUPACIONES}
             disabled={ajustes.saving}
@@ -456,7 +459,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   }
 
   function Bloque({ theme, host, abre, enPanel, workspaceId }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean; workspaceId?: string }) {
-    const { agentes, subagentes, vigilantes, workspaces, proyectos, cambios, tareas, contexto, plegado, error } = useSyncExternalStore(suscribe, lee);
+    const { agentes, subagentes, vigilantes, workspaces, proyectos, cambios, tareas, contexto, espera, plegado, error } = useSyncExternalStore(suscribe, lee);
     const ajustes = useSettings(ajustesAgentes);
     const modo: Agrupar = ajustes.status === "ready" ? ajustes.values.agrupar : "estado";
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
@@ -479,11 +482,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       () => todos.map((grupo) => ({ ...grupo, agentes: visibles(grupo.agentes) })).filter((grupo) => grupo.agentes.length > 0),
       [todos, plegado.ocultos],
     );
-    // La vista «espera» fuerza su propio filtro: solo lo que espera a una persona, sin árbol ni fichas.
-    const grupos = useMemo(
-      () => (modo === "espera" ? gruposVisibles.filter((grupo) => ESPERA.includes(grupo.grupo)) : filtrar(gruposVisibles)),
-      [gruposVisibles, plegado.filtro, modo],
-    );
+    const grupos = useMemo(() => filtrar(gruposVisibles), [gruposVisibles, plegado.filtro]);
+    // La vista «espera» (SC-4703): pregunta pendiente, error, o «PARA DANI:» sin respuesta en el transcript. Sin árbol,
+    // sin fichas y sin filtros de proyecto: nada de lo que espera puede quedar oculto por ellos.
+    const sesionesEnEspera = useMemo(() => new Set(Object.keys(espera).filter((id) => espera[id])), [espera]);
+    const filas = useMemo(() => filasEspera(agentes, sesionesEnEspera), [agentes, sesionesEnEspera]);
     const porProy = useMemo(
       () =>
         porProyecto(agentes, subagentes, workspaces, proyectos)
@@ -637,6 +640,29 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         </Fragment>
       );
     };
+    // Fila de la vista «espera»: sin cabeceras de grupo; el icono dice qué espera (SC-4703).
+    const filaDe = (agente: Fila, grupo: Grupo) => {
+      const tiempo = hace(terminos.get(agente.id), Date.now());
+      const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+      const tokens = sesion ? contexto[sesion] : undefined;
+      const fila = {
+        icon: ICONOS[grupo],
+        label: agente.title ?? "Sin título",
+        onPress: () => abre(agente.id),
+        trailing: (
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+            {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
+            {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
+          </View>
+        ),
+      };
+      return enPanel || letra === "compacta" ? (
+        <FilaPanel key={agente.id} {...fila} color={theme.colors.foreground} tam={fuente} />
+      ) : (
+        <SidebarRow key={agente.id} id={agente.id} {...fila} />
+      );
+    };
     return (
       <View style={enPanel ? { flex: 1, paddingTop: 8 } : undefined}>
         {enPanel ? null : <SidebarSeparator />}
@@ -648,26 +674,31 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         >
           <Pliegue size={12} color={tenue} />
           <Text style={[texto, { flex: 1 }]}>Agentes</Text>
-          {(modo === "espera" ? grupos : gruposVisibles).map(({ grupo, titulo, agentes }) => {
-            const Simbolo = ICONOS[grupo];
-            const activo = plegado.filtro.includes(grupo);
-            return (
-              <Pressable
-                key={grupo}
-                accessibilityRole="button"
-                accessibilityLabel={`Filtrar por ${titulo}`}
-                accessibilityState={{ selected: activo }}
-                hitSlop={6}
-                onPress={() =>
-                  pliega({ ...plegado, filtro: activo ? plegado.filtro.filter((otro) => otro !== grupo) : [...plegado.filtro, grupo] })
-                }
-                style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6, opacity: activo || plegado.filtro.length === 0 ? 1 : 0.35 }}
-              >
-                <Simbolo size={12} color={tenue} />
-                <Text style={texto}>{agentes.length}</Text>
-              </Pressable>
-            );
-          })}
+          {modo === "espera" ? (
+            // Contador estático: en esta vista no hay grupos que filtrar.
+            <Text style={texto}>{filas.length}</Text>
+          ) : (
+            gruposVisibles.map(({ grupo, titulo, agentes }) => {
+              const Simbolo = ICONOS[grupo];
+              const activo = plegado.filtro.includes(grupo);
+              return (
+                <Pressable
+                  key={grupo}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filtrar por ${titulo}`}
+                  accessibilityState={{ selected: activo }}
+                  hitSlop={6}
+                  onPress={() =>
+                    pliega({ ...plegado, filtro: activo ? plegado.filtro.filter((otro) => otro !== grupo) : [...plegado.filtro, grupo] })
+                  }
+                  style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6, opacity: activo || plegado.filtro.length === 0 ? 1 : 0.35 }}
+                >
+                  <Simbolo size={12} color={tenue} />
+                  <Text style={texto}>{agentes.length}</Text>
+                </Pressable>
+              );
+            })
+          )}
           <BotonesPlegar label="todo" color={tenue} onPlegar={() => pliegaTodo(true)} onDesplegar={() => pliegaTodo(false)} />
           {ajustes.status === "ready" ? (
             <Pressable
@@ -709,8 +740,13 @@ export function contributeAgentes(client: PluginClientContext): () => void {
               })}
             </View>
             )}
-            {modo === "espera" && grupos.length === 0 ? <Text style={[texto, sangria]}>Nada te espera.</Text> : null}
-            {modo === "workspace"
+            {modo === "espera" ? (
+              filas.length === 0 ? (
+                <Text style={[texto, sangria]}>Nada te espera.</Text>
+              ) : (
+                filas.map(({ agente, grupo }) => filaDe(agente, grupo))
+              )
+            ) : modo === "workspace"
               ? porProy.map(({ proyecto, workspaces: wss }) => {
                   const id = proyecto?.projectId ?? "";
                   const cerrado = plegado.proyectos.includes(id);
@@ -762,7 +798,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   );
                 })
               : grupos.map((grupo) => dibujaGrupo(grupo, 0))}
-            {enPanel && cambiosDelWorkspace.length > 0 ? (
+            {enPanel && modo !== "espera" && cambiosDelWorkspace.length > 0 ? (
               <Seccion
                 titulo="Cambios"
                 total={cambiosDelWorkspace.length}
@@ -782,7 +818,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 ))}
               </Seccion>
             ) : null}
-            {enPanel && totalTareas > 0 ? (
+            {enPanel && modo !== "espera" && totalTareas > 0 ? (
               <Seccion
                 titulo="Tareas"
                 total={totalTareas}
@@ -836,7 +872,7 @@ const LADOS = [
 const AGRUPACIONES = [
   { label: "Por estado: necesita datos, en ejecución…", value: "estado" },
   { label: "Proyecto → workspace → estado → agentes", value: "workspace" },
-  { label: "Solo lo que te espera: preguntas, errores y para revisar", value: "espera" },
+  { label: "Solo lo que te espera: preguntas, errores y «PARA DANI:» sin responder", value: "espera" },
 ];
 
 const LETRAS = [

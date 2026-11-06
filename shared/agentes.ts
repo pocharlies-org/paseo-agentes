@@ -29,9 +29,6 @@ const TITULOS: Record<Grupo, string> = {
 };
 const GRUPOS = Object.keys(TITULOS) as Grupo[];
 
-/** La vista simple «Solo lo que te espera»: lo que espera a una persona, en orden de urgencia; en marcha y ya visto quedan fuera. */
-export const ESPERA: readonly Grupo[] = ["necesitaDatos", "conError", "paraRevisar"];
-
 /**
  * Paseo's own precedence (`deriveAgentStateBucket` of its protocol): data it needs beats an error, which beats a running
  * turn, which beats an end nobody has opened yet; everything else is done. `requiresAttention` is cleared by Paseo when
@@ -107,6 +104,37 @@ export function agrupar<T extends Agente>(
 ): GrupoDe<T>[] {
   const { filas, enMarcha } = filasDe(agentes, conSubagentes);
   return gruposDe(filas, enMarcha);
+}
+
+/**
+ * Filas de la vista «solo lo que te espera» (SC-4703): pregunta pendiente, error, o un «PARA DANI:» sin respuesta en su
+ * último turno (`sesionesEnEspera`: sesiones Claude cuyo transcript leyó el daemon así). Lo en marcha queda fuera; el
+ * orden es pregunta, error, «PARA DANI:», y dentro de cada clase lo más reciente primero.
+ */
+export function filasEspera<T extends Agente>(
+  agentes: readonly T[],
+  sesionesEnEspera: ReadonlySet<string>,
+): { agente: T; grupo: Grupo }[] {
+  const { filas } = filasDe(agentes, new Set());
+  const marcas: readonly Grupo[] = ["necesitaDatos", "conError", "paraRevisar"];
+  const sesionDe = (agente: T) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
+  const marcaDe = (agente: T): Grupo | null => {
+    if (agente.pendingPermissions.length > 0 || agente.attentionReason === "permission") return "necesitaDatos";
+    if (agente.status === "error" || agente.attentionReason === "error") return "conError";
+    if (agente.status !== "running" && sesionesEnEspera.has(sesionDe(agente))) return "paraRevisar";
+    return null;
+  };
+  return filas
+    .map((agente) => {
+      const grupo = marcaDe(agente);
+      return grupo === null ? null : { agente, grupo };
+    })
+    .filter((fila): fila is { agente: T; grupo: Grupo } => fila !== null)
+    .sort(
+      (a, b) =>
+        marcas.indexOf(a.grupo) - marcas.indexOf(b.grupo) ||
+        (b.agente.attentionTimestamp ?? b.agente.createdAt).localeCompare(a.agente.attentionTimestamp ?? a.agente.createdAt),
+    );
 }
 
 /** The fields of a Paseo workspace (`WorkspaceDescriptorPayload`) its sidebar row is drawn from; its status is the daemon's own. */

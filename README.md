@@ -3,7 +3,8 @@
 A Paseo plugin: one block with every agent of the host, grouped by the states Paseo itself computes — the agents
 asking you something, the ones running, the ones that finished and nobody has looked at — by project and workspace,
 with the workspace's own status and time on its header and the state groups inside, like Paseo's sidebar; or in the
-simple view «Solo lo que te espera»: only the agents waiting for you, flat, with the running ones filtered out. Shown on the left
+simple view «Solo lo que te espera»: only the agents waiting for you — questions, errors and unanswered «PARA DANI:» —
+flat, with the running ones filtered out. Shown on the left
 (sidebar header) or on the right (an Explorer panel), configurable per host. Each row opens its agent; each row shows
 the Claude subagents and background watchers that agent has running. As the right panel it adds, like Claude Desktop:
 each agent's context tokens, a «Cambios» section (the open PR of the panel's workspace branch with its GitHub Actions

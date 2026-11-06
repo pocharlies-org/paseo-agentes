@@ -47,7 +47,7 @@ export function tokensDeContexto(suelta: string): number | null {
 }
 
 /** Reads the tail of the session's JSONL (the last turn is all that is needed); null if the file is not where the cwd says. */
-export async function contexto(sesion: string, cwd: string, proyectos = join(homedir(), ".claude", "projects")): Promise<number | null> {
+export async function lectura(sesion: string, cwd: string, proyectos = join(homedir(), ".claude", "projects")): Promise<string | null> {
   const ruta = join(proyectos, cwd.replace(/\//g, "-"), `${sesion}.jsonl`);
   try {
     const fh = await open(ruta, "r");
@@ -56,11 +56,46 @@ export async function contexto(sesion: string, cwd: string, proyectos = join(hom
       const desde = Math.max(0, size - 64 * 1024);
       const buffer = Buffer.alloc(size - desde);
       await fh.read(buffer, 0, buffer.length, desde);
-      return tokensDeContexto(buffer.toString("utf8"));
+      return buffer.toString("utf8");
     } finally {
       await fh.close();
     }
   } catch {
     return null;
   }
+}
+
+export async function contexto(sesion: string, cwd: string, proyectos = join(homedir(), ".claude", "projects")): Promise<number | null> {
+  const suelta = await lectura(sesion, cwd, proyectos);
+  return suelta === null ? null : tokensDeContexto(suelta);
+}
+
+/**
+ * ¿El último turno del agente dejó un «PARA DANI:» sin respuesta? Se busca hacia atrás desde el final del transcript:
+ * la primera respuesta real del usuario (texto escrito, no un resultado de herramienta) cierra la espera; un texto del
+ * agente con la marca la abre. La marca es la ley de la casa para «espera a Dani» (reglas de la compañía).
+ */
+export function esperaDeDani(suelta: string): boolean {
+  const lineas = suelta.split("\n");
+  for (let i = lineas.length - 1; i >= 0; i--) {
+    const linea = lineas[i]!;
+    if (!linea.includes('"role"')) continue;
+    let mensaje: { role?: string; content?: unknown };
+    try {
+      mensaje = JSON.parse(linea)?.message;
+    } catch {
+      continue; // A torn last line: keep looking upward.
+    }
+    if (!mensaje || typeof mensaje.role !== "string") continue;
+    const partes = Array.isArray(mensaje.content) ? (mensaje.content as { type?: string; text?: string }[]) : [];
+    if (mensaje.role === "user") {
+      if (typeof mensaje.content === "string" && mensaje.content.trim() !== "") return false;
+      if (partes.some((parte) => parte.type === "text")) return false;
+      continue; // A tool result is not an answer.
+    }
+    if (mensaje.role !== "assistant") continue;
+    const texto = typeof mensaje.content === "string" ? mensaje.content : partes.map((parte) => parte.text ?? "").join("\n");
+    if (/(^|\n)\s*PARA DANI[:：]/.test(texto)) return true;
+  }
+  return false;
 }

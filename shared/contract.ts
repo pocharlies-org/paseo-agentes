@@ -32,12 +32,13 @@ export const TareaSchema = z.object({
 });
 export type Tarea = z.infer<typeof TareaSchema>;
 
-/** The Claude Code task list and the context used (tokens of the last turn) per session, read on the daemon host (SC-2838). */
+/** The Claude Code task list, the context used (tokens of the last turn) and whether the last turn left a «PARA DANI:» unanswered, per session, read on the daemon host (SC-2838, SC-4703). */
 export const contextoList = defineRpc({
   name: "contexto.list",
   input: z.object({ sesiones: z.array(z.object({ id: z.string(), cwd: z.string() }).strict()) }).strict(),
   output: z.object({
     tareas: z.record(z.string(), z.array(TareaSchema)),
     contexto: z.record(z.string(), z.number().int().nonnegative()),
+    espera: z.record(z.string(), z.boolean()),
   }),
 });
