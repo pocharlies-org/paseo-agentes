@@ -67,9 +67,9 @@ question and no marker is not listed. Upgrade when the daemon carries an "answer
 
 Every row says two more things at a glance:
 
-- **Who runs it**, as a colored stripe before the row's icon: violet for a company session (asynchronous: its workspace
+- **Who runs it**, as a colored dot at the row's end: violet for a company session (asynchronous: its workspace
   is `~/compania`, where `company-sesion` starts them, or its Paseo category), teal for Hermes (`paseo-categorias/hermes`),
-  and no stripe for a live session — the normal case.
+  and no dot for a live session — the normal case.
 - **What its last turn waits on**, as a small chip before the time, read from the closing line of the last turn in the
   transcript (the same grammar the supervisor reads): «tú» for `PARA DANI:`, «sesión» for `ESPERA: jira …` or
   `PARA IT/SECURITY/QA:` (another session or ticket), «CI» for `ESPERA: ci|merge|review|run|argocd …`, «fecha» for

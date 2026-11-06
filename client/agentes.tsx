@@ -574,12 +574,13 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
                 const tokens = sesion ? contexto[sesion] : undefined;
                 const fila = {
-                  icon: conTipo(modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo], tipoDeFila(agente)),
+                  icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
                   label: agente.title ?? "Sin título",
                   onPress: () => abre(agente.id),
                   trailing: (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+                      <PuntoTipo tipo={tipoDeFila(agente)} />
                       <ChipEspera espera={sesion ? espera[sesion] : undefined} color={tenue} tam={fuente} />
                       {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
                       {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
@@ -655,12 +656,13 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
       const tokens = sesion ? contexto[sesion] : undefined;
       const fila = {
-        icon: conTipo(ICONOS[grupo], tipoDeFila(agente)),
+        icon: ICONOS[grupo],
         label: agente.title ?? "Sin título",
         onPress: () => abre(agente.id),
         trailing: (
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+            <PuntoTipo tipo={tipoDeFila(agente)} />
             {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
             {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
           </View>
@@ -924,23 +926,20 @@ const GRUPO_DEL_CAMBIO: Record<EstadoCambios, Grupo> = {
 };
 const ICONO_TAREA: Record<Tarea["status"], string> = { pending: "Circle", in_progress: "CircleDot", completed: "Check" };
 
-// SC-4800: el tipo de sesión, en color, como una franja delante del icono de la fila; en vivo no lleva franja (es lo normal).
-const COLOR_TIPO: Record<Tipo, string | null> = { compania: "#8b5cf6", hermes: "#14b8a6", vivo: null };
-// One component per (icon, type), so a row keeps its element across renders (like `dibujo`).
-const conTipos = new WeakMap<Dibujo, Partial<Record<Tipo, Dibujo>>>();
-function conTipo(Icono: Dibujo, tipo: Tipo): Dibujo {
-  const franja = COLOR_TIPO[tipo];
-  if (!franja) return Icono;
-  const porTipo = conTipos.get(Icono) ?? {};
-  conTipos.set(Icono, porTipo);
-  return (porTipo[tipo] ??= function ConTipo({ size, color }) {
-    return (
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-        <View style={{ width: 3, height: size + 2, borderRadius: 2, backgroundColor: franja }} />
-        <Icono size={size} color={color} />
-      </View>
-    );
-  });
+// SC-4800: quién lleva la sesión, como un punto de color al final de la fila; en vivo no lleva punto (es lo normal).
+const COLOR_TIPO: Record<Tipo, { color: string; titulo: string } | null> = {
+  compania: { color: "#8b5cf6", titulo: "Sesión de la compañía (asíncrona)" },
+  hermes: { color: "#14b8a6", titulo: "Sesión de Hermes" },
+  vivo: null,
+};
+function PuntoTipo({ tipo }: { tipo: Tipo }) {
+  const marca = COLOR_TIPO[tipo];
+  if (!marca) return null;
+  return (
+    <View accessible accessibilityLabel={marca.titulo} style={{ paddingRight: 6 }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: marca.color }} />
+    </View>
+  );
 }
 
 // SC-4800: a qué espera el último cierre de la sesión, al final de la fila; sin cierre, nada.
