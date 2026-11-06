@@ -65,7 +65,7 @@ test("the last usage of the transcript is the context used; a torn last line kee
   assert.equal(tokensDeContexto(JSON.stringify({ type: "user" })), null);
 });
 
-test("the transcript is found by the escaped cwd; a missing one is null, never a throw", async () => {
+test("the transcript is found by the escaped cwd, or by its session id elsewhere (SC-4800); a missing one is null, never a throw", async () => {
   const raiz = mkdtempSync(join(mkdtempSync("/tmp/"), "projects-"));
   const cwd = "/home/x/proyecto";
   try {
@@ -75,7 +75,10 @@ test("the transcript is found by the escaped cwd; a missing one is null, never a
       JSON.stringify({ message: { usage: { input_tokens: 1, cache_read_input_tokens: 2, cache_creation_input_tokens: 3 } } }) + "\n",
     );
     assert.equal(await contexto(sesion, cwd, raiz), 6);
-    assert.equal(await contexto(sesion, "/home/x/otro", raiz), null);
+    // A company session lives in a Paseo category folder but runs in ~/compania: found by its id under another project.
+    assert.equal(await contexto(sesion, "/home/x/otro", raiz), 6);
+    assert.equal(await contexto("ffffffff-0000-4000-8000-000000000000", cwd, raiz), null);
+    assert.equal(await contexto(sesion, cwd, join(raiz, "no-existe")), null);
   } finally {
     rmSync(raiz, { recursive: true, force: true });
   }
