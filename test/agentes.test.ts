@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, tipoDe, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -231,4 +231,14 @@ test("by project: the project asking comes first, its workspaces inside, unknown
   // The project of a row comes from its own projectId when the workspace is unknown to the daemon.
   const sinTrabajo = porProyecto([agente("x", { workspaceId: "w-mudo", projectId: "p-k8s" })], new Set(), trabajos, proyectos);
   assert.deepEqual(sinTrabajo.map(({ proyecto }) => proyecto?.projectDisplayName), ["k8s"]);
+});
+
+test("a session's type comes from its workspace directory: company, Hermes, or live (SC-4800)", () => {
+  assert.equal(tipoDe("/home/dibanez/compania"), "compania");
+  assert.equal(tipoDe("/home/dibanez/compania/dev/SC-4777-developer"), "compania");
+  assert.equal(tipoDe("/home/dibanez/.local/state/x86-host-runtime/paseo-categorias/compania"), "compania");
+  assert.equal(tipoDe("/home/dibanez/.local/state/x86-host-runtime/paseo-categorias/hermes/"), "hermes");
+  assert.equal(tipoDe("/home/dibanez/k8s/skirmshop"), "vivo");
+  assert.equal(tipoDe("/home/dibanez/src/compania-tools"), "vivo");
+  assert.equal(tipoDe(undefined), "vivo");
 });

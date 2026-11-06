@@ -345,3 +345,17 @@ export function insignias(serverId: string, proyectos: readonly Proyecto[]): Map
     }),
   );
 }
+
+/** Quién lleva la sesión (SC-4800): la compañía (asíncrona), Hermes, o Dani en vivo. */
+export type Tipo = "compania" | "hermes" | "vivo";
+
+/**
+ * El tipo sale del directorio del workspace, que es donde cada lanzador pone sus sesiones: la compañía en ~/compania
+ * (company_runtime WORKSPACE) y su categoría de Paseo, Hermes en la suya (paseo-categorias/hermes); el resto es en vivo.
+ */
+export function tipoDe(cwd: string | null | undefined): Tipo {
+  const ruta = (cwd ?? "").replace(/\/+$/, "");
+  if (/\/paseo-categorias\/hermes$/.test(ruta)) return "hermes";
+  if (/\/compania(?:\/|$)/.test(ruta) || /\/paseo-categorias\/compania$/.test(ruta)) return "compania";
+  return "vivo";
+}

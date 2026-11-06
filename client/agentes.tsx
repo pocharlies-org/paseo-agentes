@@ -26,10 +26,12 @@ import {
   type Insignia,
   type Plegado,
   type Proyecto,
+  tipoDe,
+  type Tipo,
   type Workspace,
 } from "../shared/agentes.ts";
 import { ajustesAgentes, type Agrupar, type Lado, type Letra } from "../shared/ajustes.ts";
-import { cambiosList, contextoList, type CambiosLinea, type EstadoCambios, type Tarea, vigilantesList } from "../shared/contract.ts";
+import { cambiosList, contextoList, type CambiosLinea, type Espera, type EstadoCambios, type Tarea, vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
 
@@ -122,8 +124,8 @@ interface Foto {
   readonly tareas: Readonly<Record<string, readonly Tarea[]>>;
   /** Context used by the last turn, in tokens, per session id. */
   readonly contexto: Readonly<Record<string, number>>;
-  /** Sessions whose last turn left a «PARA DANI:» unanswered (the daemon read the transcript), by session id. */
-  readonly espera: Readonly<Record<string, boolean>>;
+  /** What each session's last closing line waits on (the daemon read the transcript), by session id; absent = nothing. */
+  readonly espera: Readonly<Record<string, Espera>>;
   readonly plegado: Plegado;
   readonly error: string | null;
 }
@@ -466,6 +468,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const { height } = useWindowDimensions();
     const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
     const enMarcha = useMemo(() => enMarchaPorFila(agentes, subagentes, vigilantes), [agentes, subagentes, vigilantes]);
+    // Compañía, Hermes o en vivo, por el directorio de su workspace (SC-4800).
+    const tipoDeFila = (agente: Fila): Tipo => {
+      const ws = agente.workspaceId ? workspaces.get(agente.workspaceId) : undefined;
+      return tipoDe(ws?.directory ?? ws?.projectRootPath);
+    };
     // A relative time goes stale while nothing else moves: wake the block once a minute.
     const [, despierta] = useState(0);
     useEffect(() => {
@@ -485,7 +492,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const grupos = useMemo(() => filtrar(gruposVisibles), [gruposVisibles, plegado.filtro]);
     // La vista «espera» (SC-4703): pregunta pendiente, error, o «PARA DANI:» sin respuesta en el transcript. Sin árbol,
     // sin fichas y sin filtros de proyecto: nada de lo que espera puede quedar oculto por ellos.
-    const sesionesEnEspera = useMemo(() => new Set(Object.keys(espera).filter((id) => espera[id])), [espera]);
+    // Solo lo de Dani: lo que espera a CI, a otra sesión o a una fecha no le espera a él (SC-4800).
+    const sesionesEnEspera = useMemo(() => new Set(Object.keys(espera).filter((id) => espera[id] === "dani")), [espera]);
     const filas = useMemo(() => filasEspera(agentes, sesionesEnEspera), [agentes, sesionesEnEspera]);
     const porProy = useMemo(
       () =>
@@ -566,12 +574,13 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
                 const tokens = sesion ? contexto[sesion] : undefined;
                 const fila = {
-                  icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
+                  icon: conTipo(modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo], tipoDeFila(agente)),
                   label: agente.title ?? "Sin título",
                   onPress: () => abre(agente.id),
                   trailing: (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+                      <ChipEspera espera={sesion ? espera[sesion] : undefined} color={tenue} tam={fuente} />
                       {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
                       {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
                     </View>
@@ -646,7 +655,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
       const tokens = sesion ? contexto[sesion] : undefined;
       const fila = {
-        icon: ICONOS[grupo],
+        icon: conTipo(ICONOS[grupo], tipoDeFila(agente)),
         label: agente.title ?? "Sin título",
         onPress: () => abre(agente.id),
         trailing: (
@@ -914,6 +923,44 @@ const GRUPO_DEL_CAMBIO: Record<EstadoCambios, Grupo> = {
   sinPr: "terminado",
 };
 const ICONO_TAREA: Record<Tarea["status"], string> = { pending: "Circle", in_progress: "CircleDot", completed: "Check" };
+
+// SC-4800: el tipo de sesión, en color, como una franja delante del icono de la fila; en vivo no lleva franja (es lo normal).
+const COLOR_TIPO: Record<Tipo, string | null> = { compania: "#8b5cf6", hermes: "#14b8a6", vivo: null };
+// One component per (icon, type), so a row keeps its element across renders (like `dibujo`).
+const conTipos = new WeakMap<Dibujo, Partial<Record<Tipo, Dibujo>>>();
+function conTipo(Icono: Dibujo, tipo: Tipo): Dibujo {
+  const franja = COLOR_TIPO[tipo];
+  if (!franja) return Icono;
+  const porTipo = conTipos.get(Icono) ?? {};
+  conTipos.set(Icono, porTipo);
+  return (porTipo[tipo] ??= function ConTipo({ size, color }) {
+    return (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+        <View style={{ width: 3, height: size + 2, borderRadius: 2, backgroundColor: franja }} />
+        <Icono size={size} color={color} />
+      </View>
+    );
+  });
+}
+
+// SC-4800: a qué espera el último cierre de la sesión, al final de la fila; sin cierre, nada.
+const ESPERAS: Record<Espera, { icono: string; texto: string; titulo: string }> = {
+  dani: { icono: "User", texto: "tú", titulo: "Espera a Dani (PARA DANI)" },
+  sesion: { icono: "Users", texto: "sesión", titulo: "Espera a otra sesión o a un ticket (ESPERA: jira, PARA IT/SECURITY/QA)" },
+  ci: { icono: "GitPullRequest", texto: "CI", titulo: "Espera a CI, a un merge, un run o ArgoCD" },
+  fecha: { icono: "Clock", texto: "fecha", titulo: "Espera a una fecha" },
+  entrega: { icono: "Check", texto: "hecho", titulo: "Entregado (ESTADO: ENTREGA)" },
+};
+function ChipEspera({ espera, color, tam }: { espera: Espera | undefined; color: string; tam: number }) {
+  if (!espera) return null;
+  const { icono, texto, titulo } = ESPERAS[espera];
+  return (
+    <View accessible accessibilityLabel={titulo} style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingRight: 6 }}>
+      <Icon name={icono} size={Math.max(10, tam - 2)} color={color} />
+      <Text style={{ color, fontSize: Math.max(10, tam - 2) }}>{texto}</Text>
+    </View>
+  );
+}
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
 function FilaPanel({ icon: Icono, label, onPress, trailing, color, tam = 13 }: { icon: Dibujo; label: string; onPress(): void; trailing: React.ReactNode; color: string; tam?: number }) {
