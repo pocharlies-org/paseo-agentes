@@ -17,6 +17,21 @@ export interface Agente {
   readonly runtimeInfo?: { readonly sessionId: string | null };
 }
 
+/**
+ * The Claude session id of an agent: its `persistence.sessionId`, or the runtime's. A company session (provider `compania`,
+ * the plugin in x86-host-runtime) wraps it as `plugin:{"version":1,"data":{"sid":…}}`; the transcript is named by that sid.
+ */
+export function sesionDe(agente: Pick<Agente, "persistence" | "runtimeInfo">): string {
+  const id = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
+  if (!id.startsWith("plugin:")) return id;
+  try {
+    const sid = JSON.parse(id.slice("plugin:".length))?.data?.sid;
+    return typeof sid === "string" ? sid : "";
+  } catch {
+    return "";
+  }
+}
+
 // The same buckets and Spanish labels as Paseo's status view (`STATUS_BUCKET_ORDER` and `statusBucket` in its i18n).
 export type Grupo = "necesitaDatos" | "conError" | "paraRevisar" | "enEjecucion" | "terminado";
 
@@ -117,7 +132,6 @@ export function filasEspera<T extends Agente>(
 ): { agente: T; grupo: Grupo }[] {
   const { filas } = filasDe(agentes, new Set());
   const marcas: readonly Grupo[] = ["necesitaDatos", "conError", "paraRevisar"];
-  const sesionDe = (agente: T) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
   const marcaDe = (agente: T): Grupo | null => {
     if (agente.pendingPermissions.length > 0 || agente.attentionReason === "permission") return "necesitaDatos";
     if (agente.status === "error" || agente.attentionReason === "error") return "conError";
@@ -244,7 +258,7 @@ export function enMarchaPorFila<T extends Agente>(
   const porFila = new Map<string, EnMarcha>();
   for (const agente of agentes) {
     const raiz = raizDe(agente, porId);
-    const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+    const sesion = sesionDe(agente);
     const enMarcha = { subagentes: subagentes.get(agente.id) ?? 0, vigilantes: (sesion && vigilantes[sesion]) || 0 };
     if (!raiz || enMarcha.subagentes + enMarcha.vigilantes === 0) continue;
     const previo = porFila.get(raiz.id);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, tipoDe, type Agente } from "../shared/agentes.ts";
+import { agrupar, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, sesionDe, tipoDe, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -241,4 +241,13 @@ test("a session's type comes from its workspace directory: company, Hermes, or l
   assert.equal(tipoDe("/home/dibanez/k8s/skirmshop"), "vivo");
   assert.equal(tipoDe("/home/dibanez/src/compania-tools"), "vivo");
   assert.equal(tipoDe(undefined), "vivo");
+});
+
+test("a company session's id is unwrapped from its plugin persistence; a plain one passes through", () => {
+  const envuelto = 'plugin:{"version":1,"data":{"sid":"08653b1c-f50e-43de-814d-349ea3cecc62","key":"SC-4815","rol":"it"}}';
+  assert.equal(sesionDe({ persistence: { sessionId: envuelto } }), "08653b1c-f50e-43de-814d-349ea3cecc62");
+  assert.equal(sesionDe({ persistence: null, runtimeInfo: { sessionId: envuelto } }), "08653b1c-f50e-43de-814d-349ea3cecc62");
+  assert.equal(sesionDe({ persistence: { sessionId: "0f0e0d0c-0b0a-4908-8706-050403020100" } }), "0f0e0d0c-0b0a-4908-8706-050403020100");
+  assert.equal(sesionDe({ persistence: { sessionId: "plugin:{roto" } }), "");
+  assert.equal(sesionDe({}), "");
 });
