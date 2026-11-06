@@ -32,13 +32,17 @@ export const TareaSchema = z.object({
 });
 export type Tarea = z.infer<typeof TareaSchema>;
 
-/** The Claude Code task list, the context used (tokens of the last turn) and whether the last turn left a «PARA DANI:» unanswered, per session, read on the daemon host (SC-2838, SC-4703). */
+/** What the last turn's closing line waits on (SC-4800): Dani (PARA DANI), another session or ticket (ESPERA: jira, PARA IT/SECURITY/QA), CI (ci, merge, review, run, argocd), a date, or done (ESTADO: ENTREGA). */
+export const Espera = z.enum(["dani", "sesion", "ci", "fecha", "entrega"]);
+export type Espera = z.infer<typeof Espera>;
+
+/** The Claude Code task list, the context used (tokens of the last turn) and what its last closing line waits on, per session, read on the daemon host (SC-2838, SC-4703, SC-4800). */
 export const contextoList = defineRpc({
   name: "contexto.list",
   input: z.object({ sesiones: z.array(z.object({ id: z.string(), cwd: z.string() }).strict()) }).strict(),
   output: z.object({
     tareas: z.record(z.string(), z.array(TareaSchema)),
     contexto: z.record(z.string(), z.number().int().nonnegative()),
-    espera: z.record(z.string(), z.boolean()),
+    espera: z.record(z.string(), Espera),
   }),
 });

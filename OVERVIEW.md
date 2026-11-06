@@ -60,8 +60,21 @@ daemon host, like the context tokens; it is the house's law for "waiting on Dani
 and opening one does not take it off the list — only answering does. Empty, it says «Nada te espera.». The project
 chips and the header's group filters do not apply here (nothing waiting can be hidden by them), and the panel's
 «Cambios» and «Tareas» sections are not drawn in this view.
-shortcut: only «PARA DANI:» counts, read from the last 64 KiB of the transcript; a session that stops with a plain
+shortcut: of the closing lines only «PARA DANI:» lists a session here (the others are its chip), read from the last 64 KiB of the transcript; a session that stops with a plain
 question and no marker is not listed. Upgrade when the daemon carries an "answered" state.
+
+## Who runs it and what it waits on (SC-4800)
+
+Every row says two more things at a glance:
+
+- **Who runs it**, as a colored stripe before the row's icon: violet for a company session (asynchronous: its workspace
+  is `~/compania`, where `company-sesion` starts them, or its Paseo category), teal for Hermes (`paseo-categorias/hermes`),
+  and no stripe for a live session — the normal case.
+- **What its last turn waits on**, as a small chip before the time, read from the closing line of the last turn in the
+  transcript (the same grammar the supervisor reads): «tú» for `PARA DANI:`, «sesión» for `ESPERA: jira …` or
+  `PARA IT/SECURITY/QA:` (another session or ticket), «CI» for `ESPERA: ci|merge|review|run|argocd …`, «fecha» for
+  `ESPERA: fecha …`, and «hecho» for `ESTADO: ENTREGA`. If a turn has several, Dani wins, then another session, then CI,
+  then the date. A written reply of yours after it clears the chip; a turn with no closing line shows none.
 
 ## Left or right, configurable
 
