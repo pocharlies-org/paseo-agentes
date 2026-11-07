@@ -577,7 +577,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 const sesion = sesionDe(agente);
                 const tokens = sesion ? contexto[sesion] : undefined;
                 const fila = {
-                  icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
+                  icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : iconoDe(grupo, theme),
                   label: agente.title ?? "Sin título",
                   onPress: () => abre(agente.id),
                   trailing: (
@@ -659,7 +659,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       // Sin tokens aquí (SC-4777): lo que importa es quién espera, de dónde y desde cuándo.
       const ws = agente.workspaceId ? workspaces.get(agente.workspaceId)?.name : undefined;
       const fila = {
-        icon: ICONOS[grupo],
+        icon: iconoDe(grupo, theme),
         label: agente.title ?? "Sin título",
         onPress: () => abre(agente.id),
         trailing: (
@@ -697,7 +697,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             <Text style={texto}>{filas.length}</Text>
           ) : (
             gruposVisibles.map(({ grupo, titulo, agentes }) => {
-              const Simbolo = ICONOS[grupo];
+              const Simbolo = iconoDe(grupo, theme);
               const activo = plegado.filtro.includes(grupo);
               return (
                 <Pressable
@@ -1098,6 +1098,20 @@ function puntoDe(grupo: Grupo, theme: PluginHostProps["theme"]): Dibujo {
   if (!dibujado) {
     dibujado = () => <PuntoEstado grupo={grupo} theme={theme} />;
     puntos.set(clave, dibujado);
+  }
+  return dibujado;
+}
+
+// SC-4837: el glifo de estado lleva el color de su grupo (verde «para revisar», gris terminado…), no el tenue de la fila.
+const glifos = new Map<string, Dibujo>();
+function iconoDe(grupo: Grupo, theme: PluginHostProps["theme"]): Dibujo {
+  const color = colorDe(grupo, theme);
+  const clave = `${grupo}${color}`;
+  let dibujado = glifos.get(clave);
+  if (!dibujado) {
+    const Glifo = ICONOS[grupo];
+    dibujado = ({ size }) => <Glifo size={size} color={color} />;
+    glifos.set(clave, dibujado);
   }
   return dibujado;
 }
