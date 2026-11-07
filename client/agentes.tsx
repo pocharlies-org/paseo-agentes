@@ -495,7 +495,10 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     // sin fichas y sin filtros de proyecto: nada de lo que espera puede quedar oculto por ellos.
     // Solo lo de Dani: lo que espera a CI, a otra sesión o a una fecha no le espera a él (SC-4800).
     const sesionesEnEspera = useMemo(() => new Set(Object.keys(espera).filter((id) => espera[id] === "dani")), [espera]);
-    const filas = useMemo(() => filasEspera(agentes, sesionesEnEspera), [agentes, sesionesEnEspera]);
+    const filas = useMemo(
+      () => filasEspera(agentes, sesionesEnEspera, (a) => terminos.get(a.id) ?? a.attentionTimestamp ?? a.updatedAt ?? a.createdAt),
+      [agentes, sesionesEnEspera],
+    );
     const porProy = useMemo(
       () =>
         porProyecto(agentes, subagentes, workspaces, proyectos)
@@ -653,8 +656,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     // Fila de la vista «espera»: sin cabeceras de grupo; el icono dice qué espera (SC-4703).
     const filaDe = (agente: Fila, grupo: Grupo) => {
       const tiempo = hace(terminos.get(agente.id), Date.now());
-      const sesion = sesionDe(agente);
-      const tokens = sesion ? contexto[sesion] : undefined;
+      // Sin tokens aquí (SC-4777): lo que importa es quién espera, de dónde y desde cuándo.
+      const ws = agente.workspaceId ? workspaces.get(agente.workspaceId)?.name : undefined;
       const fila = {
         icon: ICONOS[grupo],
         label: agente.title ?? "Sin título",
@@ -663,7 +666,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
             <PuntoTipo tipo={tipoDeFila(agente)} />
-            {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
+            {ws ? (
+              <Text style={{ ...texto, paddingRight: 6, maxWidth: 160 }} numberOfLines={1}>
+                {ws}
+              </Text>
+            ) : null}
             {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
           </View>
         ),
