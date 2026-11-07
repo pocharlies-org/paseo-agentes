@@ -20,16 +20,19 @@ import {
   insignias,
   leePlegado,
   porProyecto,
+  sesionDe,
   type Agente,
   type EnMarcha,
   type Grupo,
   type Insignia,
   type Plegado,
   type Proyecto,
+  tipoDe,
+  type Tipo,
   type Workspace,
 } from "../shared/agentes.ts";
 import { ajustesAgentes, type Agrupar, type Lado, type Letra } from "../shared/ajustes.ts";
-import { cambiosList, contextoList, type CambiosLinea, type EstadoCambios, type Tarea, vigilantesList } from "../shared/contract.ts";
+import { cambiosList, contextoList, type CambiosLinea, type Espera, type EstadoCambios, type Tarea, vigilantesList } from "../shared/contract.ts";
 
 type Dibujo = (props: { size: number; color: string }) => React.JSX.Element;
 
@@ -122,8 +125,8 @@ interface Foto {
   readonly tareas: Readonly<Record<string, readonly Tarea[]>>;
   /** Context used by the last turn, in tokens, per session id. */
   readonly contexto: Readonly<Record<string, number>>;
-  /** Sessions whose last turn left a «PARA DANI:» unanswered (the daemon read the transcript), by session id. */
-  readonly espera: Readonly<Record<string, boolean>>;
+  /** What each session's last closing line waits on (the daemon read the transcript), by session id; absent = nothing. */
+  readonly espera: Readonly<Record<string, Espera>>;
   readonly plegado: Plegado;
   readonly error: string | null;
 }
@@ -370,7 +373,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       ...new Map(
         [...filas.values()]
           .map((agente) => {
-            const id = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+            const id = sesionDe(agente);
             const ws = agente.workspaceId ? trabajos.get(agente.workspaceId) : undefined;
             const cwd = ws?.directory ?? ws?.projectRootPath;
             return id && cwd ? [id, { id, cwd }] : null;
@@ -466,6 +469,11 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const { height } = useWindowDimensions();
     const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
     const enMarcha = useMemo(() => enMarchaPorFila(agentes, subagentes, vigilantes), [agentes, subagentes, vigilantes]);
+    // Compañía, Hermes o en vivo, por el directorio de su workspace (SC-4800).
+    const tipoDeFila = (agente: Fila): Tipo => {
+      const ws = agente.workspaceId ? workspaces.get(agente.workspaceId) : undefined;
+      return tipoDe(ws?.directory ?? ws?.projectRootPath);
+    };
     // A relative time goes stale while nothing else moves: wake the block once a minute.
     const [, despierta] = useState(0);
     useEffect(() => {
@@ -485,7 +493,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const grupos = useMemo(() => filtrar(gruposVisibles), [gruposVisibles, plegado.filtro]);
     // La vista «espera» (SC-4703): pregunta pendiente, error, o «PARA DANI:» sin respuesta en el transcript. Sin árbol,
     // sin fichas y sin filtros de proyecto: nada de lo que espera puede quedar oculto por ellos.
-    const sesionesEnEspera = useMemo(() => new Set(Object.keys(espera).filter((id) => espera[id])), [espera]);
+    // Solo lo de Dani: lo que espera a CI, a otra sesión o a una fecha no le espera a él (SC-4800).
+    const sesionesEnEspera = useMemo(() => new Set(Object.keys(espera).filter((id) => espera[id] === "dani")), [espera]);
     const filas = useMemo(
       () => filasEspera(agentes, sesionesEnEspera, (a) => terminos.get(a.id) ?? a.attentionTimestamp ?? a.updatedAt ?? a.createdAt),
       [agentes, sesionesEnEspera],
@@ -511,7 +520,6 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       return [...conteo].sort(([, a], [, b]) => b - a);
     }, [todos]);
     // The panel's extra sections belong to the workspace the panel is open on (SC-2864): all hosts' 600+ tasks are noise.
-    const sesionDe = (agente: Fila) => agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId ?? "";
     const cambiosDelWorkspace = useMemo(() => {
       const ws = workspaceId ? workspaces.get(workspaceId) : undefined;
       const dir = ws?.directory ?? ws?.projectRootPath;
@@ -566,7 +574,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                 const desde = grupo === "enEjecucion" ? agente.activeTurn?.startedAt ?? agente.updatedAt ?? terminos.get(agente.id) : terminos.get(agente.id);
                 const tiempo = hace(desde, Date.now());
                 // Tokens of context the last turn held (Claude Desktop shows the same on its session).
-                const sesion = agente.persistence?.sessionId ?? agente.runtimeInfo?.sessionId;
+                const sesion = sesionDe(agente);
                 const tokens = sesion ? contexto[sesion] : undefined;
                 const fila = {
                   icon: modo === "workspace" ? puntoDe(grupo, theme) : insignia ? dibujo(insignia) : ICONOS[grupo],
@@ -575,6 +583,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
                   trailing: (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+                      <PuntoTipo tipo={tipoDeFila(agente)} />
+                      <ChipEspera espera={sesion ? espera[sesion] : undefined} color={tenue} tam={fuente} />
                       {tokens ? <Text style={{ ...texto, paddingRight: 6 }}>{`${Math.round(tokens / 1000)}k`}</Text> : null}
                       {tiempo ? <Text style={{ ...texto, paddingRight: 8 }}>{tiempo}</Text> : null}
                     </View>
@@ -655,6 +665,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         trailing: (
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <Marcas enMarcha={enMarcha.get(agente.id)} color={tenue} />
+            <PuntoTipo tipo={tipoDeFila(agente)} />
             {ws ? (
               <Text style={{ ...texto, paddingRight: 6, maxWidth: 160 }} numberOfLines={1}>
                 {ws}
@@ -921,6 +932,41 @@ const GRUPO_DEL_CAMBIO: Record<EstadoCambios, Grupo> = {
   sinPr: "terminado",
 };
 const ICONO_TAREA: Record<Tarea["status"], string> = { pending: "Circle", in_progress: "CircleDot", completed: "Check" };
+
+// SC-4800: quién lleva la sesión, como un punto de color al final de la fila; en vivo no lleva punto (es lo normal).
+const COLOR_TIPO: Record<Tipo, { color: string; titulo: string } | null> = {
+  compania: { color: "#8b5cf6", titulo: "Sesión de la compañía (asíncrona)" },
+  hermes: { color: "#14b8a6", titulo: "Sesión de Hermes" },
+  vivo: null,
+};
+function PuntoTipo({ tipo }: { tipo: Tipo }) {
+  const marca = COLOR_TIPO[tipo];
+  if (!marca) return null;
+  return (
+    <View accessible accessibilityLabel={marca.titulo} style={{ paddingRight: 6 }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: marca.color }} />
+    </View>
+  );
+}
+
+// SC-4800: a qué espera el último cierre de la sesión, al final de la fila; sin cierre, nada.
+const ESPERAS: Record<Espera, { icono: string; texto: string; titulo: string }> = {
+  dani: { icono: "User", texto: "tú", titulo: "Espera a Dani (PARA DANI)" },
+  sesion: { icono: "Users", texto: "sesión", titulo: "Espera a otra sesión o a un ticket (ESPERA: jira, PARA IT/SECURITY/QA)" },
+  ci: { icono: "GitPullRequest", texto: "CI", titulo: "Espera a CI, a un merge, un run o ArgoCD" },
+  fecha: { icono: "Clock", texto: "fecha", titulo: "Espera a una fecha" },
+  entrega: { icono: "Check", texto: "hecho", titulo: "Entregado (ESTADO: ENTREGA)" },
+};
+function ChipEspera({ espera, color, tam }: { espera: Espera | undefined; color: string; tam: number }) {
+  if (!espera) return null;
+  const { icono, texto, titulo } = ESPERAS[espera];
+  return (
+    <View accessible accessibilityLabel={titulo} style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingRight: 6 }}>
+      <Icon name={icono} size={Math.max(10, tam - 2)} color={color} />
+      <Text style={{ color, fontSize: Math.max(10, tam - 2) }}>{texto}</Text>
+    </View>
+  );
+}
 
 // SidebarRow only renders inside a sidebar item; in the Explorer panel a row is drawn here, with the same parts.
 function FilaPanel({ icon: Icono, label, onPress, trailing, color, tam = 13 }: { icon: Dibujo; label: string; onPress(): void; trailing: React.ReactNode; color: string; tam?: number }) {
