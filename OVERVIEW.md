@@ -126,7 +126,7 @@ are noise:
   subject per line with its state icon.
 
 Tasks, transcript tokens and closing lines are read on the daemon host by the server part, from a cache that only a
-change invalidates: three recursive file watches (`~/.claude/tasks`, `~/.claude/projects`, `<tmp>/claude-<uid>`) say
+change refreshes: three recursive file watches (`~/.claude/tasks`, `~/.claude/projects`, `<tmp>/claude-<uid>`) say
 which session changed, and only that one is read again — what it shows moves only when its tasks, tokens or closing line
 really change. Each client holds one call that the server answers with just the sessions of that client that changed
 (or empty after 20 s with nothing): no timer asks for anything, and the whole list goes out only on the first call or
