@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, sesionDe, tipoDe, type Agente } from "../shared/agentes.ts";
+import { agrupar, cambiosDe, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, sesionDe, tipoDe, tokensDe, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -254,4 +254,29 @@ test("a company session's id is unwrapped from its plugin persistence; a plain o
   assert.equal(sesionDe({ persistence: { sessionId: "0f0e0d0c-0b0a-4908-8706-050403020100" } }), "0f0e0d0c-0b0a-4908-8706-050403020100");
   assert.equal(sesionDe({ persistence: { sessionId: "plugin:{roto" } }), "");
   assert.equal(sesionDe({}), "");
+});
+
+test("«Cambios» reads from Paseo's own git and forge state: the open PR with checks done, else repo · branch (SC-5601)", () => {
+  const git = { currentBranch: "SC-1-x", remoteUrl: "git@github.com:pocharlies-org/paseo-agentes.git" };
+  const pr = (extra: object) => ({ number: 31, title: "Un cambio", isMerged: false, state: "OPEN", ...extra });
+  assert.deepEqual(cambiosDe({ gitRuntime: git, githubRuntime: { pullRequest: pr({ checksStatus: "pending", checks: [{ status: "success" }, { status: "pending" }, { status: "skipped" }] }) } }), {
+    texto: "paseo-agentes #31 · Un cambio · 2/3",
+    estado: "marcha",
+  });
+  assert.equal(cambiosDe({ gitRuntime: git, githubRuntime: { pullRequest: pr({ checksStatus: "failure", checks: [] }) } })?.estado, "roja");
+  assert.equal(cambiosDe({ gitRuntime: git, githubRuntime: { pullRequest: pr({ checksStatus: "success", checks: [] }) } })?.estado, "verde");
+  assert.equal(cambiosDe({ gitRuntime: git, githubRuntime: { pullRequest: pr({}) } })?.estado, "sinChecks");
+  // Merged or without PR: the branch line, as before.
+  assert.deepEqual(cambiosDe({ gitRuntime: git, githubRuntime: { pullRequest: pr({ isMerged: true, state: "MERGED" }) } }), { texto: "paseo-agentes · SC-1-x", estado: "sinPr" });
+  assert.deepEqual(cambiosDe({ gitRuntime: git, githubRuntime: null }), { texto: "paseo-agentes · SC-1-x", estado: "sinPr" });
+  // No branch or no remote: no line (a plain directory, or a clone without origin).
+  assert.equal(cambiosDe({ gitRuntime: { currentBranch: "main", remoteUrl: null } }), null);
+  assert.equal(cambiosDe({}), null);
+});
+
+test("tokens: what the provider reports wins; the transcript fills the rest", () => {
+  assert.equal(tokensDe({ lastUsage: { contextWindowUsedTokens: 278745 } }, 1000), 278745);
+  assert.equal(tokensDe({ lastUsage: { contextWindowUsedTokens: 0 } }, 1000), 1000);
+  assert.equal(tokensDe({}, 1000), 1000);
+  assert.equal(tokensDe({ lastUsage: null }, undefined), undefined);
 });

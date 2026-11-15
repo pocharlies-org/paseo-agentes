@@ -1,10 +1,10 @@
-import { open, readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Espera, Tarea } from "../shared/contract.ts";
 
 // Claude Code keeps each session's task list in ~/.claude/tasks/<session id>/<n>.json and its transcript in
-// ~/.claude/projects/<cwd escaped>/<session id>.jsonl. Both live on the daemon host, so the panel reads them here.
+// ~/.claude/projects/<cwd escaped>/<session id>.jsonl. Both live on the daemon host: these are the parsers, vigilia.ts decides when.
 
 /** The task list of one session, ordered by task number; {} parts when the directory does not exist (session with no tasks). */
 export async function tareas(sesion: string, raiz = join(homedir(), ".claude", "tasks")): Promise<Tarea[]> {
@@ -46,34 +46,13 @@ export function tokensDeContexto(suelta: string): number | null {
   return null;
 }
 
-/**
- * Where the session's JSONL is: under its workspace directory, or — when the session runs elsewhere (a company session
- * lives in a Paseo category folder but runs in ~/compania) — under whichever project holds that session id, which is unique.
- */
-async function rutaDe(sesion: string, cwd: string, proyectos: string): Promise<string | null> {
-  const directa = join(proyectos, cwd.replace(/\//g, "-"), `${sesion}.jsonl`);
-  try {
-    await stat(directa);
-    return directa;
-  } catch {
-    // shortcut: one readdir of ~/.claude/projects per miss; cache it if the host grows past a few hundred projects.
-    for (const carpeta of await readdir(proyectos).catch(() => [] as string[])) {
-      const ruta = join(proyectos, carpeta, `${sesion}.jsonl`);
-      if (await stat(ruta).then(() => true, () => false)) return ruta;
-    }
-    return null;
-  }
-}
-
-/** Reads the tail of the session's JSONL (the last turn is all that is needed); null if there is none. */
-export async function lectura(sesion: string, cwd: string, proyectos = join(homedir(), ".claude", "projects")): Promise<string | null> {
-  const ruta = await rutaDe(sesion, cwd, proyectos);
-  if (!ruta) return null;
+/** The last `bytes` of a transcript (the last turn is all that is needed); null when the file is not there. */
+export async function leeCola(ruta: string, bytes = 64 * 1024): Promise<string | null> {
   try {
     const fh = await open(ruta, "r");
     try {
       const { size } = await fh.stat();
-      const desde = Math.max(0, size - 64 * 1024);
+      const desde = Math.max(0, size - bytes);
       const buffer = Buffer.alloc(size - desde);
       await fh.read(buffer, 0, buffer.length, desde);
       return buffer.toString("utf8");
@@ -83,11 +62,6 @@ export async function lectura(sesion: string, cwd: string, proyectos = join(home
   } catch {
     return null;
   }
-}
-
-export async function contexto(sesion: string, cwd: string, proyectos = join(homedir(), ".claude", "projects")): Promise<number | null> {
-  const suelta = await lectura(sesion, cwd, proyectos);
-  return suelta === null ? null : tokensDeContexto(suelta);
 }
 
 // La gramática del cierre de turno de la casa, la misma que lee el supervisor (company_runtime ESPERA_RE / PARA_RE /

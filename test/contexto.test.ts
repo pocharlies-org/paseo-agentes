@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { cierreDe, contexto, esperaDe, tareas, tokensDeContexto } from "../server/contexto.ts";
+import { cierreDe, esperaDe, leeCola, tareas, tokensDeContexto } from "../server/contexto.ts";
 
 const sesion = "0f0e0d0c-0b0a-4908-8706-050403020100";
 
@@ -65,20 +65,14 @@ test("the last usage of the transcript is the context used; a torn last line kee
   assert.equal(tokensDeContexto(JSON.stringify({ type: "user" })), null);
 });
 
-test("the transcript is found by the escaped cwd, or by its session id elsewhere (SC-4800); a missing one is null, never a throw", async () => {
+test("the tail of a transcript is its last bytes; a missing file is null, never a throw", async () => {
   const raiz = mkdtempSync(join(mkdtempSync("/tmp/"), "projects-"));
-  const cwd = "/home/x/proyecto";
   try {
-    mkdirSync(join(raiz, cwd.replace(/\//g, "-")), { recursive: true });
-    writeFileSync(
-      join(raiz, cwd.replace(/\//g, "-"), `${sesion}.jsonl`),
-      JSON.stringify({ message: { usage: { input_tokens: 1, cache_read_input_tokens: 2, cache_creation_input_tokens: 3 } } }) + "\n",
-    );
-    assert.equal(await contexto(sesion, cwd, raiz), 6);
-    // A company session lives in a Paseo category folder but runs in ~/compania: found by its id under another project.
-    assert.equal(await contexto(sesion, "/home/x/otro", raiz), 6);
-    assert.equal(await contexto("ffffffff-0000-4000-8000-000000000000", cwd, raiz), null);
-    assert.equal(await contexto(sesion, cwd, join(raiz, "no-existe")), null);
+    const ruta = join(raiz, `${sesion}.jsonl`);
+    writeFileSync(ruta, "x".repeat(100) + "\n" + JSON.stringify({ message: { usage: { input_tokens: 1, cache_read_input_tokens: 2 } } }));
+    assert.equal(tokensDeContexto((await leeCola(ruta))!), 3);
+    assert.equal((await leeCola(ruta, 10))!.length, 10);
+    assert.equal(await leeCola(join(raiz, "no-existe.jsonl")), null);
   } finally {
     rmSync(raiz, { recursive: true, force: true });
   }

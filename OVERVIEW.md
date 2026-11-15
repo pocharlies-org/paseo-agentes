@@ -104,9 +104,10 @@ So the block and Paseo's status view never disagree, the plugin mirrors the daem
 On the right of each row, two badges with their counts: a robot for running Claude subagents and an eye for running
 watchers (background `Bash` / `Monitor` tasks of that session), children's marks summed into the row. This is the
 part Paseo does not track: Claude Code keeps each task's output file open while it runs, so the plugin's server part
-lists the daemon user's open files once per agent-list change (at most every 3 s) and counts those task files
-per session: it scans `/proc` on Linux (~150 ms) and runs `lsof` asynchronously on macOS and other Unix without `/proc`
-(5 s timeout). Where neither works (Windows, `lsof` missing or failing) the watcher counts are zero and the badges only show
+counts, per session, the task files some process holds open: it scans `/proc` on Linux (~180 ms) and runs `lsof`
+asynchronously on macOS and other Unix without `/proc` (5 s timeout). It scans once per change, shared by every client:
+when a task file is created under `<tmp>/claude-<uid>` (a watch says so) and when a turn starts or ends (a task's end
+wakes its agent). Where neither works (Windows, `lsof` missing or failing) the watcher counts are zero and the badges only show
 subagents. A foreground command inside a live turn also holds the file, so it counts while the agent is running —
 which is already visible by its group.
 
@@ -116,24 +117,26 @@ Like Claude Desktop's right panel, the Explorer panel adds two foldable sections
 its context. Both sections show only the workspace the panel is open on (SC-2864) — the whole host's hundreds of tasks
 are noise:
 
-- **Tokens of context** at the end of each row (e.g. `117k`): what the last turn held, read from the session's
-  transcript (`~/.claude/projects/<cwd>/<session>.jsonl`, its last `usage`).
-- **Cambios**: the open PR of the workspace's branch with its GitHub Actions rollup (`repo #12 · title · 4/5` and a
-  colored dot: green, red, running, no checks), or `repo · branch` when the branch has no PR — resolved with
-  `gh pr view --json statusCheckRollup`, one call per workspace directory (two workspaces on the same branch are one
-  line, and each line carries the directories it came from). Refreshed every 60 s and on workspace changes.
+- **Tokens of context** at the end of each row (e.g. `117k`): what the last turn held — the provider's own report when
+  it sends one, else the session's transcript (`~/.claude/projects/<folder>/<session>.jsonl`, its last `usage`).
+- **Cambios**: the open PR of the workspace's branch with its checks (`repo #12 · title · 4/5` and a colored dot:
+  green, red, running, no checks), or `repo · branch` when the branch has no PR — taken from what Paseo's own git and
+  GitHub observers send with every workspace update, so it moves when Paseo sees the PR move.
 - **Tareas**: the Claude Code task list of the workspace's agents that are rows (`~/.claude/tasks/<session>/<n>.json`),
   subject per line with its state icon.
 
-Both sections and the context tokens are read on the daemon host by the server part, on the same throttled reads; the
-sections only render in the Explorer panel (the left block stays as it was).
+Tasks, transcript tokens and closing lines are read on the daemon host by the server part, from a cache that only a
+change invalidates: three recursive file watches (`~/.claude/tasks`, `~/.claude/projects`, `<tmp>/claude-<uid>`) say
+which session changed, and only that one is read again. Each client holds one call that the server answers when
+something changes (or after 20 s with nothing): no timer asks for anything (SC-5601). The sections only render in the
+Explorer panel (the left block stays as it was).
 
 ## Privacy
 
 Everything stays inside your Paseo daemon. The client subscribes to the agent list and the project list through the
 SDK (a snapshot plus one event per change, no polling) and listens to the subagent event. The server part reads which
 files each process of the daemon's user has open (`/proc`, or `lsof` restricted to that user), the task lists and
-transcript tails under `~/.claude`, and asks GitHub through `gh` for the Cambios section. It writes nothing to the daemon except its own
+transcript tails under `~/.claude`, watching those directories for changes. It writes nothing to the daemon except its own
 settings document (the side). Folding and hidden projects live in the
 client's `localStorage`.
 
