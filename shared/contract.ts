@@ -14,22 +14,30 @@ export type Tarea = z.infer<typeof TareaSchema>;
 export const Espera = z.enum(["dani", "sesion", "ci", "fecha", "entrega"]);
 export type Espera = z.infer<typeof Espera>;
 
+/** One session's part of the panel: its task list, the context its last turn used (tokens) and what its closing line waits on. */
+export const SesionSchema = z.object({
+  tareas: z.array(TareaSchema),
+  tokens: z.number().int().nonnegative().nullable(),
+  espera: Espera.nullable(),
+});
+export type Sesion = z.infer<typeof SesionSchema>;
+
 /**
  * What the panel needs and Paseo has no event for, read on the daemon host (SC-2838, SC-4703, SC-4800): each session's Claude
- * Code task list, the context its last turn used (tokens) and what its last closing line waits on, and the running Claude Code
- * tasks (watchers) per session. A long poll (SC-5601): with `since` equal to the server's version the call is held until
- * something changes or the hold expires (`changed: false`, nothing else filled); otherwise it answers at once.
+ * Code task list, tokens and closing line, and the running Claude Code tasks (watchers) per session. A long poll that answers
+ * only what moved (SC-5601): `sesiones` holds the asked sessions whose data changed after `since`, and `vigilantes` comes only
+ * when it changed; `completo` means every asked session is there and replaces what the client had (a first call, `since: 0`,
+ * or a `since` from before the plugin was reloaded). When nothing of the caller's moved, the call is held until something does
+ * or the hold expires (empty answer at the same version).
  */
 export const panelWatch = defineRpc({
   name: "panel.watch",
   input: z.object({ sesiones: z.array(z.string()), since: z.number().int() }).strict(),
   output: z.object({
-    tareas: z.record(z.string(), z.array(TareaSchema)),
-    contexto: z.record(z.string(), z.number().int().nonnegative()),
-    espera: z.record(z.string(), Espera),
-    vigilantes: z.record(z.string(), z.number().int().nonnegative()),
+    sesiones: z.record(z.string(), SesionSchema),
+    vigilantes: z.record(z.string(), z.number().int().nonnegative()).optional(),
     version: z.number().int(),
-    changed: z.boolean(),
+    completo: z.boolean(),
   }),
 });
 export type Panel = z.infer<typeof panelWatch.output>;

@@ -187,7 +187,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     estados.set(agente.id, agente.status);
   };
 
-  const vigila = vigilaPanel(client.rpc, ({ tareas, contexto, espera, vigilantes }) => publica({ tareas, contexto, espera, vigilantes }), lifetime.signal);
+  const vigila = vigilaPanel(client.rpc, publica, lifetime.signal);
 
   void client.paseo.agents
     .list({ subscribe: {}, signal: lifetime.signal })
