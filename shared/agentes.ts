@@ -165,7 +165,7 @@ export interface Workspace {
   readonly statusEnteredAt: string | null;
   /** The clone root on the daemon host: the fallback when a workspace has no directory of its own. */
   readonly projectRootPath?: string;
-  /** Where the workspace's sessions run (its worktree when it has one): what «Cambios» and the transcript are read by. */
+  /** Where the workspace's sessions run (its worktree when it has one): what a session's type (company, Hermes, live) is read by. */
   readonly directory?: string;
   /** The panel's «Cambios» line for this workspace, from Paseo's own git and forge observers (see cambiosDe); null = none. */
   readonly cambios?: { readonly texto: string; readonly estado: EstadoCambios } | null;

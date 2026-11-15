@@ -4,13 +4,6 @@ import { z } from "zod";
 /** How a «Cambios» line reads (SC-2838): its checks green, red or running, a PR without checks, or a branch without a PR. */
 export type EstadoCambios = "verde" | "roja" | "marcha" | "sinChecks" | "sinPr";
 
-/** One line of the «Cambios» list: `repo #num · título · ok/total` (or `repo · rama` without a PR), with the workspace directories that produced it (the panel shows only its own). */
-export interface CambiosLinea {
-  readonly texto: string;
-  readonly estado: EstadoCambios;
-  readonly rutas: readonly string[];
-}
-
 export const TareaSchema = z.object({
   subject: z.string(),
   status: z.enum(["pending", "in_progress", "completed"]),

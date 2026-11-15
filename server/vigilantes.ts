@@ -77,7 +77,7 @@ async function escanea(proc: string, lsof: string, uid: number | undefined): Pro
   }
 }
 
-// The client re-reads on every agent change (throttled at 3 s); on a busy host a full scan can outlast the RPC timeout and pile
+// The server rescans on every turn start or end and every task file created or removed (vigilia.ts); on a busy host a full scan can outlast the RPC timeout and pile
 // up. A fresh result is reused for CADUCIDAD and a scan already running for the same target is shared, so two reads in a row
 // cost one scan and concurrent reads never stack.
 const CADUCIDAD = 2000;
