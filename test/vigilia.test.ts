@@ -24,17 +24,25 @@ function hogar() {
 }
 
 const espera = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+const pendiente = <T>(promesa: Promise<T>) => {
+  const estado = { resuelta: false };
+  void promesa.then(() => (estado.resuelta = true));
+  return estado;
+};
 
-test("the first call answers at once with every session's tasks, tokens, closing line and watchers", async () => {
+test("the first call answers at once with every asked session and the watchers, marked complete", async () => {
   const h = hogar();
   const v = vigilia(h.raices, async () => ({ [A]: 2 }));
   try {
     const p = await v.espera([A, B], 0);
-    assert.equal(p.changed, true);
-    assert.deepEqual(p.tareas, { [A]: [{ subject: "Primera", status: "in_progress" }] });
-    assert.deepEqual(p.contexto, { [A]: 100, [B]: 7 });
-    assert.deepEqual(p.espera, { [B]: "dani" });
+    assert.equal(p.completo, true);
+    assert.deepEqual(p.sesiones, {
+      [A]: { tareas: [{ subject: "Primera", status: "in_progress" }], tokens: 100, espera: null },
+      [B]: { tareas: [], tokens: 7, espera: "dani" },
+    });
     assert.deepEqual(p.vigilantes, { [A]: 2 });
+    assert.ok(p.version >= Date.now() - 60_000, "the version starts at the instance's start, so an older since gets everything");
+    assert.equal((await v.espera([A], 5)).completo, true, "a since from a previous instance");
   } finally {
     v.cierra();
     h.limpia();
@@ -47,13 +55,11 @@ test("while nothing changes nothing is read: a call at the current version is he
   const v = vigilia(h.raices, async () => (escaneos++, {}));
   try {
     const { version } = await v.espera([A, B], 0);
-    // Three clients at once, on a cache that is fresh: one scan in total, no file read again.
     await Promise.all([v.espera([A, B], 0), v.espera([A], 0), v.espera([B], 0)]);
     assert.equal(escaneos, 1);
-    let resuelta = false;
-    void v.espera([A, B], version).then(() => (resuelta = true));
+    const retenida = pendiente(v.espera([A, B], version));
     await espera(300);
-    assert.equal(resuelta, false, "a call at the current version waits for a change");
+    assert.equal(retenida.resuelta, false, "a call at the current version waits for a change");
     assert.equal(escaneos, 1);
   } finally {
     v.cierra();
@@ -61,7 +67,7 @@ test("while nothing changes nothing is read: a call at the current version is he
   }
 });
 
-test("a write to a transcript wakes the held call with that session read again, and only that one", async () => {
+test("a write that changes a session's tokens wakes the held call with that session alone", async () => {
   const h = hogar();
   const v = vigilia(h.raices, async () => ({}));
   try {
@@ -70,10 +76,48 @@ test("a write to a transcript wakes the held call with that session read again, 
     await espera(100); // inotify is armed
     appendFileSync(join(h.raices.projects, "-home-x", `${A}.jsonl`), linea(250));
     const p = await retenida;
-    assert.equal(p.changed, true);
+    assert.equal(p.completo, false);
     assert.ok(p.version > version);
-    assert.equal(p.contexto[A], 250);
-    assert.equal(p.contexto[B], 7);
+    assert.deepEqual(p.sesiones, { [A]: { tareas: [{ subject: "Primera", status: "in_progress" }], tokens: 250, espera: null } });
+    assert.equal(p.vigilantes, undefined, "the watchers did not change: not sent");
+  } finally {
+    v.cierra();
+    h.limpia();
+  }
+});
+
+test("a write that changes nothing shown does not wake anyone nor move the version", async () => {
+  const h = hogar();
+  const v = vigilia(h.raices, async () => ({}));
+  try {
+    const { version } = await v.espera([A, B], 0);
+    const retenida = pendiente(v.espera([A, B], version));
+    await espera(100);
+    // A tool's progress line: no usage, no closing line, no user text.
+    appendFileSync(join(h.raices.projects, "-home-x", `${A}.jsonl`), JSON.stringify({ type: "progress", data: "…" }) + "\n");
+    await espera(500);
+    assert.equal(retenida.resuelta, false);
+    const ahora = await Promise.race([v.espera([A, B], version), espera(200).then(() => null)]);
+    assert.equal(ahora, null, "still the same version: held");
+  } finally {
+    v.cierra();
+    h.limpia();
+  }
+});
+
+test("a client is not woken by another client's session", async () => {
+  const h = hogar();
+  const v = vigilia(h.raices, async () => ({}));
+  try {
+    const { version } = await v.espera([A, B], 0);
+    const deA = pendiente(v.espera([A], version));
+    const deB = v.espera([B], version);
+    await espera(100);
+    appendFileSync(join(h.raices.projects, "-home-compania", `${B}.jsonl`), JSON.stringify({ message: { role: "user", content: "sí" } }) + "\n");
+    const p = await deB;
+    assert.deepEqual(p.sesiones, { [B]: { tareas: [], tokens: 7, espera: null } }, "Dani answered: no longer waiting on him");
+    await espera(200);
+    assert.equal(deA.resuelta, false);
   } finally {
     v.cierra();
     h.limpia();
@@ -89,50 +133,51 @@ test("a task file written wakes the held call with the new list", async () => {
     await espera(100);
     writeFileSync(join(h.raices.tasks, A, "2.json"), JSON.stringify({ subject: "Segunda", status: "pending" }));
     const p = await retenida;
-    assert.equal(p.tareas[A]?.length, 2);
+    assert.equal(p.sesiones[A]?.tareas.length, 2);
   } finally {
     v.cierra();
     h.limpia();
   }
 });
 
-test("a turn recounts the watchers once, and a background task file created does too", async () => {
+test("a turn or a background task file recounts the watchers, and only a different count wakes anyone", async () => {
   const h = hogar();
+  const cuentas = [{ [A]: 1 }, { [A]: 1 }, { [A]: 2 }];
   let escaneos = 0;
-  const v = vigilia(h.raices, async () => (escaneos++, {}));
+  const v = vigilia(h.raices, async () => cuentas[Math.min(escaneos++, cuentas.length - 1)]!);
   try {
     const { version } = await v.espera([A], 0);
-    v.turno();
-    const p = await v.espera([A], version);
+    const retenida = v.espera([A], version);
+    const sigue = pendiente(retenida);
+    v.turno(); // same count: nobody woken
+    await espera(300);
     assert.equal(escaneos, 2);
-    await espera(2_100); // the turn's notice has gone out: the next call is held at the current version
-    const retenida = v.espera([A], p.version);
-    await espera(100);
+    assert.equal(sigue.resuelta, false);
+    await espera(1_800); // the next round may run
     mkdirSync(join(h.raices.salidas, "-home-x", A, "tasks"), { recursive: true });
     writeFileSync(join(h.raices.salidas, "-home-x", A, "tasks", "b1.output"), "");
-    await retenida;
+    const p = await retenida;
     assert.equal(escaneos, 3);
+    assert.deepEqual(p.vigilantes, { [A]: 2 });
+    assert.deepEqual(p.sesiones, {});
   } finally {
     v.cierra();
     h.limpia();
   }
 });
 
-test("a transcript created after the first look is found by the watch, without walking the projects again", async () => {
+test("a transcript created after the first look is found by the watch and wakes its session's caller", async () => {
   const h = hogar();
   const v = vigilia(h.raices, async () => ({}));
   const nueva = "2f0e0d0c-0b0a-4908-8706-050403020100";
   try {
-    const { version, contexto } = await v.espera([nueva], 0);
-    assert.equal(contexto[nueva], undefined);
-    const retenida = v.espera([nueva], version);
+    const primera = await v.espera([nueva], 0);
+    assert.deepEqual(primera.sesiones[nueva], { tareas: [], tokens: null, espera: null });
+    const retenida = v.espera([nueva], primera.version);
     await espera(100);
     mkdirSync(join(h.raices.projects, "-home-y"), { recursive: true });
     writeFileSync(join(h.raices.projects, "-home-y", `${nueva}.jsonl`), linea(42));
-    // The session was never read with a transcript, so the write does not wake anyone: the next ask reads it from the index.
-    v.turno();
-    await retenida;
-    assert.equal((await v.espera([nueva], 0)).contexto[nueva], 42);
+    assert.equal((await retenida).sesiones[nueva]?.tokens, 42);
   } finally {
     v.cierra();
     h.limpia();

@@ -8,5 +8,6 @@ Build and deploy: the daemon compiles it on load; `paseo plugin update paseo-age
 Canonical parts: parsers `server/contexto.ts`; watcher scan and its guard `server/vigilantes.ts`; watches, cache and long poll
 `server/vigilia.ts`; the client's single held call `client/vigila.ts`.
 Rules (SC-5601): no timer feeds data (only the render clock of «hace X min»); nothing reads disk or `/proc` per client — every read
-comes from the server's cache, invalidated by file watches or turn hooks; what Paseo already sends (`lastUsage`, `gitRuntime`,
+comes from the server's cache, refreshed by file watches or turn hooks; an answer carries only what changed for that client
+(per-session deltas over its `since`, complete only on a first call or a new set of sessions); what Paseo already sends (`lastUsage`, `gitRuntime`,
 `githubRuntime`, subagent events) is used as is, never read again by the plugin.
