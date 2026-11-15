@@ -1,3 +1,5 @@
+import type { EstadoCambios } from "./contract.ts";
+
 /** The fields of a Paseo agent (`AgentSnapshotPayload`) this plugin reads. */
 export interface Agente {
   readonly id: string;
@@ -15,6 +17,8 @@ export interface Agente {
   readonly labels?: Readonly<Record<string, string>>;
   readonly persistence?: { readonly sessionId: string } | null;
   readonly runtimeInfo?: { readonly sessionId: string | null };
+  /** What the provider reports of the last turn; Claude Code sessions often leave the context window out. */
+  readonly lastUsage?: { readonly contextWindowUsedTokens?: number } | null;
 }
 
 /**
@@ -161,9 +165,47 @@ export interface Workspace {
   readonly statusEnteredAt: string | null;
   /** The clone root on the daemon host: the fallback when a workspace has no directory of its own. */
   readonly projectRootPath?: string;
-  /** Where the workspace's sessions run (its worktree when it has one): what «Cambios» and the transcript are read by. */
+  /** Where the workspace's sessions run (its worktree when it has one): what a session's type (company, Hermes, live) is read by. */
   readonly directory?: string;
+  /** The panel's «Cambios» line for this workspace, from Paseo's own git and forge observers (see cambiosDe); null = none. */
+  readonly cambios?: { readonly texto: string; readonly estado: EstadoCambios } | null;
 }
+
+/** The git and GitHub state Paseo keeps per workspace and sends with every workspace update (its own observers poll gh). */
+export interface RuntimeDeWorkspace {
+  readonly gitRuntime?: { readonly currentBranch?: string | null; readonly remoteUrl?: string | null } | null;
+  readonly githubRuntime?: {
+    readonly pullRequest?: {
+      readonly number?: number;
+      readonly title: string;
+      readonly isMerged: boolean;
+      readonly state: string;
+      readonly checks?: ReadonlyArray<{ readonly status: string }>;
+      readonly checksStatus?: "success" | "pending" | "none" | "failure";
+    } | null;
+  } | null;
+}
+
+/**
+ * The «Cambios» line of a workspace (SC-2838, like Claude Desktop): its branch's open PR with the checks done over the total,
+ * or `repo · rama` without a PR; null without a branch or a remote. Read from what Paseo already sends (SC-5601), never gh.
+ */
+export function cambiosDe(w: RuntimeDeWorkspace): { texto: string; estado: EstadoCambios } | null {
+  const rama = w.gitRuntime?.currentBranch;
+  const repo = w.gitRuntime?.remoteUrl?.replace(/^.*[/:]/, "").replace(/\.git$/, "");
+  if (!rama || !repo) return null;
+  const pr = w.githubRuntime?.pullRequest;
+  if (!pr || pr.isMerged || pr.state.toUpperCase() !== "OPEN") return { texto: `${repo} · ${rama}`, estado: "sinPr" };
+  const checks = pr.checks ?? [];
+  const hechos = checks.filter((c) => c.status === "success" || c.status === "skipped").length;
+  const estado: EstadoCambios =
+    pr.checksStatus === "failure" ? "roja" : pr.checksStatus === "pending" ? "marcha" : pr.checksStatus === "success" ? "verde" : "sinChecks";
+  return { texto: `${repo}${pr.number ? ` #${pr.number}` : ""} · ${pr.title.slice(0, 60)} · ${hechos}/${checks.length}`, estado };
+}
+
+/** The tokens the last turn held: what the provider reported, else what the transcript says (the server reads it). */
+export const tokensDe = (agente: Pick<Agente, "lastUsage">, delTranscript: number | undefined) =>
+  agente.lastUsage?.contextWindowUsedTokens || delTranscript;
 
 // Paseo's urgency order (`STATUS_BUCKET_PRIORITY` in app utils/sidebar-agent-state.ts): what needs you first, then what
 // failed, then what is moving. A workspace the daemon has not described yet sits behind every described one.
