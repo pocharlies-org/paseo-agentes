@@ -34,7 +34,7 @@ const raicesPorDefecto = (): Raices => ({
   salidas: join(tmpdir(), `claude-${process.getuid?.() ?? 0}`),
 });
 
-/** What is shown, and the version at which it last changed. */
+/** What is shown, and the version of its last visible change (a session's tokens alone are not one). */
 interface Entrada<T> {
   datos: T;
   cambio: number;
@@ -121,7 +121,7 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
   const leeVigilantes = () => turnoDeLectura(contarVigilantes).catch(() => ({}));
   const entradaVigilantes = () => (vistos ??= leeVigilantes().then((datos) => ({ datos, cambio: version })));
 
-  // What a write marked is read again together, at most every AVISO_MS; the version moves once per thing that really changed.
+  // What a write marked is read again together, at most every AVISO_MS; the version moves once per thing whose change a client shows.
   const sucias = new Set<string>();
   let recontar = false;
   let ronda: ReturnType<typeof setTimeout> | null = null;
