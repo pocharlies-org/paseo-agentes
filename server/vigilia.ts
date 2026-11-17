@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import type { Panel, Sesion } from "../shared/contract.ts";
 import { esperaDe, leeCola, tareas as leeTareas, tokensDeContexto } from "./contexto.ts";
@@ -9,12 +9,13 @@ import { vigilantes } from "./vigilantes.ts";
 /**
  * The panel's data that Paseo has no event for — Claude Code's task lists and transcripts, and the watchers holding task files
  * open — kept in one cache that only a change touches (SC-5601). The PR of each workspace is not here: Paseo's own forge
- * observer sends it with every workspace update (`githubRuntime`). Three recursive inotify watches say which session a write
+ * observer sends it with every workspace update (`githubRuntime`). Two recursive inotify watches say which session a write
  * belongs to; that session alone is read again, and the version moves only when its tasks or closing line changed. Its tokens
  * alone move no version (SC-5849): a running turn changes them on every reply, and its row already shows the provider's live
  * count; the new count rides along with the session's next move and with every complete answer. Each held call answers only
  * the sessions it asked for that moved after its `since`, so a client is not woken by another's sessions and never receives
- * the whole panel twice.
+ * the whole panel twice. The watchers of a session are counted again only when its turn ends (SC-5923): every foreground
+ * command also holds a task file while it runs, so a count during the turn would wake every client twice per command.
  */
 
 const RETENCION_MS = 20_000; // a held call answers by then: under the daemon's 30 s plugin request timeout
@@ -24,14 +25,11 @@ const LECTURAS = 4; // reads of files or processes at once
 export interface Raices {
   readonly tasks: string;
   readonly projects: string;
-  /** Where Claude Code writes each background task's output: `<tmp>/claude-<uid>` (see vigilantes.ts). */
-  readonly salidas: string;
 }
 
 const raicesPorDefecto = (): Raices => ({
   tasks: join(homedir(), ".claude", "tasks"),
   projects: join(homedir(), ".claude", "projects"),
-  salidas: join(tmpdir(), `claude-${process.getuid?.() ?? 0}`),
 });
 
 /** What is shown, and the version of its last visible change (a session's tokens alone are not one). */
@@ -43,8 +41,8 @@ interface Entrada<T> {
 export interface Vigilia {
   /** The asked sessions that moved after `since`: at once when there are some, else when one moves or the hold expires. */
   espera(sesiones: readonly string[], since: number): Promise<Panel>;
-  /** A turn started or ended: the background tasks it launched or that woke it are counted again. */
-  turno(): void;
+  /** The session's turn ended: its foreground commands are over, so the task files it still holds are its watchers. */
+  turno(sesion: string): void;
   cierra(): void;
 }
 
@@ -118,12 +116,12 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
     return hecha;
   };
   let vistos: Promise<Entrada<Record<string, number>>> | null = null;
-  const leeVigilantes = () => turnoDeLectura(contarVigilantes).catch(() => ({}));
+  const leeVigilantes = () => turnoDeLectura(contarVigilantes).catch((): Record<string, number> => ({}));
   const entradaVigilantes = () => (vistos ??= leeVigilantes().then((datos) => ({ datos, cambio: version })));
 
   // What a write marked is read again together, at most every AVISO_MS; the version moves once per thing whose change a client shows.
   const sucias = new Set<string>();
-  let recontar = false;
+  const recontar = new Set<string>(); // sessions whose turn ended: only their counts are taken from the next scan
   let ronda: ReturnType<typeof setTimeout> | null = null;
   let ultimaRonda = 0;
   const programa = () => {
@@ -133,8 +131,8 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
     ultimaRonda = Date.now();
     const ids = [...sucias];
     sucias.clear();
-    const cuenta = recontar && vistos !== null;
-    recontar = false;
+    const recontadas = vistos === null ? [] : [...recontar]; // no count kept yet: the first call scans everything
+    recontar.clear();
     let movida = false;
     await Promise.all(
       ids.map(async (id) => {
@@ -149,16 +147,23 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
         if (visible) movida = true;
       }),
     );
-    if (cuenta) {
+    if (recontadas.length > 0) {
       const antes = await vistos!;
-      const datos = await leeVigilantes();
+      const leidos = await leeVigilantes();
+      // shortcut: a turn that starts again before this scan (≤ AVISO_MS) has its first foreground command counted until it
+      // ends; upgrade by dropping sessions whose turn started meanwhile if that shows.
+      const datos = { ...antes.datos };
+      for (const sesion of recontadas) {
+        if (leidos[sesion]) datos[sesion] = leidos[sesion];
+        else delete datos[sesion];
+      }
       if (JSON.stringify(datos) !== JSON.stringify(antes.datos)) {
         vistos = Promise.resolve({ datos, cambio: ++version });
         movida = true;
       }
     }
     ronda = null; // writes during the reads were marked: they get the next round
-    if (sucias.size > 0 || recontar) programa();
+    if (sucias.size > 0 || recontar.size > 0) programa();
     if (movida) despierta();
   };
 
@@ -175,21 +180,12 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
     void indice?.then((mapa) => mapa.set(id, join(raices.projects, relativa)));
     marca(id);
   };
-  const recuenta = () => {
-    recontar = true;
-    programa();
-  };
-  // A task file created or removed: a background task started or was cleaned up. Its output writes say nothing new, and a task
-  // ending only closes the file (no event); that end wakes its agent, so the turn hooks recount then.
-  const deSalidas = (evento: string, relativa: string) => {
-    if (evento === "rename" && relativa.split(sep).at(-2) === "tasks") recuenta();
-  };
 
   const vigilantesFs: FSWatcher[] = [];
-  const vigila = (raiz: string, cambio: (evento: string, relativa: string) => void) => {
+  const vigila = (raiz: string, cambio: (relativa: string) => void) => {
     try {
-      const w = watch(raiz, { recursive: true }, (evento, nombre) => {
-        if (nombre) cambio(evento, String(nombre));
+      const w = watch(raiz, { recursive: true }, (_evento, nombre) => {
+        if (nombre) cambio(String(nombre));
       });
       w.on("error", () => {}); // a root removed later stops reporting; the rest keep working
       vigilantesFs.push(w);
@@ -197,9 +193,8 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
       // A root that does not exist yet (no Claude Code session on this host so far): nothing to report until there is.
     }
   };
-  vigila(raices.tasks, (_evento, relativa) => marca(relativa.split(sep)[0] ?? ""));
-  vigila(raices.projects, (_evento, relativa) => deProyectos(relativa));
-  vigila(raices.salidas, deSalidas);
+  vigila(raices.tasks, (relativa) => marca(relativa.split(sep)[0] ?? ""));
+  vigila(raices.projects, deProyectos);
 
   const foto = async (pedidas: readonly string[], since: number): Promise<Panel> => {
     const enVersion = version; // a change while reading has a later version: the next call brings it (at worst twice)
@@ -224,7 +219,10 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
         if (cerrada || queda <= 0 || !(await retiene(queda))) return { sesiones: {}, version: since, completo: false };
       }
     },
-    turno: recuenta,
+    turno(sesion) {
+      recontar.add(sesion);
+      programa();
+    },
     cierra() {
       cerrada = true;
       for (const w of vigilantesFs) w.close();

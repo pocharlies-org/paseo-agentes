@@ -11,10 +11,9 @@ const linea = (tokens: number) => JSON.stringify({ message: { role: "assistant",
 
 function hogar() {
   const raiz = mkdtempSync(join(tmpdir(), "vigilia-"));
-  const raices = { tasks: join(raiz, "tasks"), projects: join(raiz, "projects"), salidas: join(raiz, "claude-1000") };
+  const raices = { tasks: join(raiz, "tasks"), projects: join(raiz, "projects") };
   mkdirSync(join(raices.tasks, A), { recursive: true });
   mkdirSync(join(raices.projects, "-home-x"), { recursive: true });
-  mkdirSync(raices.salidas, { recursive: true });
   writeFileSync(join(raices.tasks, A, "1.json"), JSON.stringify({ subject: "Primera", status: "in_progress" }));
   writeFileSync(join(raices.projects, "-home-x", `${A}.jsonl`), linea(100));
   // A company session runs in another folder than its workspace's: found by its id alone.
@@ -148,25 +147,24 @@ test("a task file written wakes the held call with the new list", async () => {
   }
 });
 
-test("a turn or a background task file recounts the watchers, and only a different count wakes anyone", async () => {
+test("a turn's end recounts that session alone, and only a different count wakes anyone", async () => {
   const h = hogar();
-  const cuentas = [{ [A]: 1 }, { [A]: 1 }, { [A]: 2 }];
+  // B is mid-turn in the later scans: its foreground commands hold task files too, and must not show nor wake anyone.
+  const cuentas: Record<string, number>[] = [{ [A]: 1, [B]: 1 }, { [A]: 1, [B]: 3 }, { [B]: 4 }];
   let escaneos = 0;
   const v = vigilia(h.raices, async () => cuentas[Math.min(escaneos++, cuentas.length - 1)]!);
   try {
-    const { version } = await v.espera([A], 0);
-    const retenida = v.espera([A], version);
+    const { version } = await v.espera([A, B], 0);
+    const retenida = v.espera([A, B], version);
     const sigue = pendiente(retenida);
-    v.turno(); // same count: nobody woken
+    v.turno(A); // A's count is the same, B's change is not A's turn: nobody woken
     await espera(300);
     assert.equal(escaneos, 2);
     assert.equal(sigue.resuelta, false);
-    await espera(1_800); // the next round may run
-    mkdirSync(join(h.raices.salidas, "-home-x", A, "tasks"), { recursive: true });
-    writeFileSync(join(h.raices.salidas, "-home-x", A, "tasks", "b1.output"), "");
+    v.turno(A); // A's background task ended: the next round (AVISO_MS later) counts it
     const p = await retenida;
     assert.equal(escaneos, 3);
-    assert.deepEqual(p.vigilantes, { [A]: 2 });
+    assert.deepEqual(p.vigilantes, { [B]: 1 }, "A has none left, B keeps the count of its own last turn end");
     assert.deepEqual(p.sesiones, {});
   } finally {
     v.cierra();
