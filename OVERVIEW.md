@@ -105,11 +105,11 @@ On the right of each row, two badges with their counts: a robot for running Clau
 watchers (background `Bash` / `Monitor` tasks of that session), children's marks summed into the row. This is the
 part Paseo does not track: Claude Code keeps each task's output file open while it runs, so the plugin's server part
 counts, per session, the task files some process holds open: it scans `/proc` on Linux (~180 ms) and runs `lsof`
-asynchronously on macOS and other Unix without `/proc` (5 s timeout). It scans once per change, shared by every client:
-when a task file is created under `<tmp>/claude-<uid>` (a watch says so) and when a turn starts or ends (a task's end
-wakes its agent). Where neither works (Windows, `lsof` missing or failing) the watcher counts are zero and the badges only show
-subagents. A foreground command inside a live turn also holds the file, so it counts while the agent is running —
-which is already visible by its group.
+asynchronously on macOS and other Unix without `/proc` (5 s timeout). Every foreground command holds a task file too,
+so it scans when an agent's turn ends and takes from that scan only that agent's session (SC-5923), shared by every
+client: a background task launched during a turn shows when the turn ends, and one that ends wakes its agent, whose next
+turn end counts it out. Where neither works (Windows, `lsof` missing or failing) the watcher counts are zero and the
+badges only show subagents.
 
 ## The session's context, in the right panel (SC-2838)
 
@@ -126,7 +126,7 @@ are noise:
   subject per line with its state icon.
 
 Tasks, transcript tokens and closing lines are read on the daemon host by the server part, from a cache that only a
-change refreshes: three recursive file watches (`~/.claude/tasks`, `~/.claude/projects`, `<tmp>/claude-<uid>`) say
+change refreshes: two recursive file watches (`~/.claude/tasks`, `~/.claude/projects`) say
 which session changed, and only that one is read again — what it shows moves only when its tasks or closing line really
 change; transcript tokens ride along with that move and with every full list, since a running agent's row already shows
 the provider's live count (SC-5849). Each client holds one call that the server answers with just the sessions of that client that changed

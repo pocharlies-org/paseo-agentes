@@ -79,9 +79,8 @@ async function escanea(proc: string, lsof: string, uid: number | undefined): Pro
 
 /**
  * Running Claude Code tasks per session id: the task files some live process holds open. Reads only what the daemon's user
- * may read. Never throws. One scan per call: vigilia.ts decides when (a task file created, a turn started or ended) and shares
- * the result between clients. shortcut: a command the agent runs in the foreground during its turn counts too (same task file);
- * fine while the row already says the turn runs, upgrade if Claude Code marks backgrounded tasks apart.
+ * may read. Never throws. One scan per call: vigilia.ts decides when (a session's turn ended) and shares the result between
+ * clients. A foreground command holds its task file too, so only the sessions whose turn just ended take their count from it.
  */
 export async function vigilantes(opciones: Opciones = {}): Promise<Record<string, number>> {
   // absolute by default: macOS ships it in /usr/sbin, which a daemon started from a GUI or launchd may not have on PATH
