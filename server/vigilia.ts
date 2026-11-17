@@ -10,9 +10,11 @@ import { vigilantes } from "./vigilantes.ts";
  * The panel's data that Paseo has no event for — Claude Code's task lists and transcripts, and the watchers holding task files
  * open — kept in one cache that only a change touches (SC-5601). The PR of each workspace is not here: Paseo's own forge
  * observer sends it with every workspace update (`githubRuntime`). Three recursive inotify watches say which session a write
- * belongs to; that session alone is read again, and the version moves only when what it shows changed (a running turn writes
- * its transcript many times without changing its tokens or closing line). Each held call answers only the sessions it asked
- * for that moved after its `since`, so a client is not woken by another's sessions and never receives the whole panel twice.
+ * belongs to; that session alone is read again, and the version moves only when its tasks or closing line changed. Its tokens
+ * alone move no version (SC-5849): a running turn changes them on every reply, and its row already shows the provider's live
+ * count; the new count rides along with the session's next move and with every complete answer. Each held call answers only
+ * the sessions it asked for that moved after its `since`, so a client is not woken by another's sessions and never receives
+ * the whole panel twice.
  */
 
 const RETENCION_MS = 20_000; // a held call answers by then: under the daemon's 30 s plugin request timeout
@@ -32,7 +34,7 @@ const raicesPorDefecto = (): Raices => ({
   salidas: join(tmpdir(), `claude-${process.getuid?.() ?? 0}`),
 });
 
-/** What is shown, and the version at which it last changed. */
+/** What is shown, and the version of its last visible change (a session's tokens alone are not one). */
 interface Entrada<T> {
   datos: T;
   cambio: number;
@@ -119,7 +121,7 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
   const leeVigilantes = () => turnoDeLectura(contarVigilantes).catch(() => ({}));
   const entradaVigilantes = () => (vistos ??= leeVigilantes().then((datos) => ({ datos, cambio: version })));
 
-  // What a write marked is read again together, at most every AVISO_MS; the version moves once per thing that really changed.
+  // What a write marked is read again together, at most every AVISO_MS; the version moves once per thing whose change a client shows.
   const sucias = new Set<string>();
   let recontar = false;
   let ronda: ReturnType<typeof setTimeout> | null = null;
@@ -138,10 +140,13 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
       ids.map(async (id) => {
         const antes = await sesiones.get(id);
         if (!antes) return;
-        const datos = await leeSesion(id);
+        const leida = await leeSesion(id);
+        // A big tool result can push the last `usage` out of the tail read: that is no count, so the last one stays.
+        const datos = { ...leida, tokens: leida.tokens ?? antes.datos.tokens };
         if (JSON.stringify(datos) === JSON.stringify(antes.datos)) return;
-        sesiones.set(id, Promise.resolve({ datos, cambio: ++version }));
-        movida = true;
+        const visible = JSON.stringify(datos.tareas) !== JSON.stringify(antes.datos.tareas) || datos.espera !== antes.datos.espera;
+        sesiones.set(id, Promise.resolve({ datos, cambio: visible ? ++version : antes.cambio }));
+        if (visible) movida = true;
       }),
     );
     if (cuenta) {

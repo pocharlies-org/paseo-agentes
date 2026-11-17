@@ -127,8 +127,9 @@ are noise:
 
 Tasks, transcript tokens and closing lines are read on the daemon host by the server part, from a cache that only a
 change refreshes: three recursive file watches (`~/.claude/tasks`, `~/.claude/projects`, `<tmp>/claude-<uid>`) say
-which session changed, and only that one is read again — what it shows moves only when its tasks, tokens or closing line
-really change. Each client holds one call that the server answers with just the sessions of that client that changed
+which session changed, and only that one is read again — what it shows moves only when its tasks or closing line really
+change; transcript tokens ride along with that move and with every full list, since a running agent's row already shows
+the provider's live count (SC-5849). Each client holds one call that the server answers with just the sessions of that client that changed
 (or empty after 20 s with nothing): no timer asks for anything, and the whole list goes out only on the first call or
 when an agent is added or removed (SC-5601). The sections only render in the
 Explorer panel (the left block stays as it was).

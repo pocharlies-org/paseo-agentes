@@ -67,19 +67,27 @@ test("while nothing changes nothing is read: a call at the current version is he
   }
 });
 
-test("a write that changes a session's tokens wakes the held call with that session alone", async () => {
+test("tokens alone wake no one: they ride along with the session's next move, and a tail without usage keeps the count", async () => {
   const h = hogar();
   const v = vigilia(h.raices, async () => ({}));
   try {
     const { version } = await v.espera([A, B], 0);
-    const retenida = v.espera([A, B], version);
+    const retenida = pendiente(v.espera([A, B], version));
     await espera(100); // inotify is armed
     appendFileSync(join(h.raices.projects, "-home-x", `${A}.jsonl`), linea(250));
-    const p = await retenida;
+    await espera(500);
+    assert.equal(retenida.resuelta, false, "a running turn's tokens do not wake the held call");
+    // A big tool result pushes the last usage out of the 64 KB tail read: still 250, not null.
+    appendFileSync(join(h.raices.projects, "-home-x", `${A}.jsonl`), JSON.stringify({ message: { role: "user", content: [{ type: "tool_result", content: "x".repeat(70_000) }] } }) + "\n");
+    await espera(2_500); // the next round may run
+    writeFileSync(join(h.raices.tasks, A, "2.json"), JSON.stringify({ subject: "Segunda", status: "pending" }));
+    const p = await v.espera([A, B], version);
     assert.equal(p.completo, false);
     assert.ok(p.version > version);
-    assert.deepEqual(p.sesiones, { [A]: { tareas: [{ subject: "Primera", status: "in_progress" }], tokens: 250, espera: null } });
+    assert.deepEqual(Object.keys(p.sesiones), [A], "that session alone");
+    assert.equal(p.sesiones[A]?.tokens, 250, "the tokens ride along with the task change");
     assert.equal(p.vigilantes, undefined, "the watchers did not change: not sent");
+    assert.equal((await v.espera([A], 0)).sesiones[A]?.tokens, 250, "a complete answer brings the last count");
   } finally {
     v.cierra();
     h.limpia();
@@ -176,8 +184,8 @@ test("a transcript created after the first look is found by the watch and wakes 
     const retenida = v.espera([nueva], primera.version);
     await espera(100);
     mkdirSync(join(h.raices.projects, "-home-y"), { recursive: true });
-    writeFileSync(join(h.raices.projects, "-home-y", `${nueva}.jsonl`), linea(42));
-    assert.equal((await retenida).sesiones[nueva]?.tokens, 42);
+    writeFileSync(join(h.raices.projects, "-home-y", `${nueva}.jsonl`), linea(42) + JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text: "PARA DANI: ¿sigo?" }] } }) + "\n");
+    assert.deepEqual((await retenida).sesiones[nueva], { tareas: [], tokens: 42, espera: "dani" });
   } finally {
     v.cierra();
     h.limpia();
