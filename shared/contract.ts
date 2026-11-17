@@ -25,8 +25,8 @@ export type Sesion = z.infer<typeof SesionSchema>;
 /**
  * What the panel needs and Paseo has no event for, read on the daemon host (SC-2838, SC-4703, SC-4800): each session's Claude
  * Code task list, tokens and closing line, and the running Claude Code tasks (watchers) per session. A long poll that answers
- * only what moved (SC-5601): `sesiones` holds the asked sessions whose data changed after `since`, and `vigilantes` comes only
- * when it changed; `completo` means every asked session is there and replaces what the client had (a first call, `since: 0`,
+ * only what moved (SC-5601): `sesiones` holds the asked sessions whose tasks or closing line changed after `since` (their
+ * tokens alone wake no one but ride along, SC-5849), and `vigilantes` comes only when it changed; `completo` means every asked session is there and replaces what the client had (a first call, `since: 0`,
  * or a `since` from before the plugin was reloaded). When nothing of the caller's moved, the call is held until something does
  * or the hold expires (empty answer at the same version).
  */
