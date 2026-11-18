@@ -26,8 +26,8 @@ Each row carries its project's icon, painted the way Paseo's workspace list pain
 palette and same key). At the end of every row sits how long ago the time it is in comes from («5m», «2h», «3d»): for a
 running row, since its turn began (like Paseo's row); for the rest, Paseo's attention time while the notice stands, and
 the running→idle moment caught live after that, so it survives opening the agent. On load, an agent already read shows
-nothing until its next turn ends — the daemon keeps no finished-at time. The "Agentes" header folds and unfolds the whole block — folded, it leaves a single line with
-one count per group — and the project chips under the header toggle whole projects on and off, so you can look at
+nothing until its next turn ends — the daemon keeps no finished-at time. The "Agentes" header folds and unfolds the whole block (every load starts folded) — folded, it leaves its title alone on a single
+line and asks the daemon for nothing — and the project chips under the header toggle whole projects on and off, so you can look at
 only your interactive sessions, or only Hermes. The header's counters are filters: pressing one shows only that group
 (press again to clear; in the waiting view the count is static), and the icon at the end of the header cycles the grouping (state → project → waiting), the same value
 as «Cómo se agrupa» in Ajustes. Two more arrows fold or unfold everything at once: on the block header (projects,

@@ -11,6 +11,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(panelWatch, ({ sesiones, since }) => panel.espera(sesiones, since));
   // A turn's end leaves only its background tasks holding files (SC-5923); the hook names the agent, Paseo its Claude session.
   server.on("agent.turn_ended", async ({ agent }, { paseo }) => {
+    if (!panel.activa()) return; // no client shows the panel: nothing to recount, and no call to Paseo per turn
     const sesion = sesionDe((await paseo.agents.ref(agent.id).refresh().catch(() => null))?.agent ?? {});
     if (sesion) panel.turno(sesion);
   });
