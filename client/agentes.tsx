@@ -141,7 +141,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], tareas: {}, contexto: {}, espera: {}, plegado: { ...leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), bloque: true }, error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], tareas: {}, contexto: {}, espera: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -467,8 +467,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       [agentes, raices, tareas, workspaceId],
     );
     const totalTareas = filasConTareas.reduce((numero, agente) => numero + (tareas[sesionDe(agente)]?.length ?? 0), 0);
-    if (!error && todos.length === 0) {
-      return enPanel ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>Ningún agente.</Text> : null;
+    // Folded, the sidebar block has no data: its title still shows, or it could never be opened.
+    if (enPanel && !error && todos.length === 0) {
+      return <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>Ningún agente.</Text>;
     }
     const tenue = theme.colors.foregroundMuted;
     // The letter setting scales the size and the air of every row at once.
@@ -478,7 +479,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     // Left edge of the rows' icons: the row's padding plus its button's.
     const sangria = { paddingLeft: 16, paddingTop: aire, paddingBottom: Math.max(2, aire - 4) };
     const linea = { ...sangria, flexDirection: "row", alignItems: "center", gap: hueco } as const;
-    const Pliegue = plegado.bloque ? CERRADO : ABIERTO;
+    const Pliegue = cerrado ? CERRADO : ABIERTO;
     const Cambio = modo === "estado" ? ICONO_GRUPOS : modo === "workspace" ? ICONO_ESPERA : ICONO_ESTADO;
     // «Plegar/desplegar todas»: the ids of the headers that exist now. Group folding stays global, as a group header's own fold is.
     const idsWs = [...new Set(porProy.flatMap(({ workspaces }) => workspaces.map(({ workspace }) => workspace?.id ?? "")))];
@@ -622,8 +623,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         {enPanel ? null : <SidebarSeparator />}
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded: !plegado.bloque }}
-          onPress={() => pliega({ ...plegado, bloque: !plegado.bloque })}
+          accessibilityState={{ expanded: !cerrado }}
+          onPress={enPanel ? undefined : () => pliega({ ...plegado, bloque: !plegado.bloque })}
           style={[linea, { paddingRight: 16 }]}
         >
           <Pliegue size={12} color={tenue} />

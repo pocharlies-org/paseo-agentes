@@ -352,7 +352,7 @@ export function leePlegado(texto: string | null): Plegado {
   const anterior = valor === null || valor.ocultos === undefined;
   const cadenas = (v: unknown) => (Array.isArray(v) ? v.filter((clave): clave is string => typeof clave === "string") : []);
   return {
-    bloque: valor?.bloque === true,
+    bloque: true, // every load starts folded (Dani 18-11): a stored open block is not reopened
     grupos: anterior && !grupos.includes("terminado") ? [...grupos, "terminado"] : grupos,
     workspaces: cadenas(valor?.workspaces),
     proyectos: cadenas(valor?.proyectos),
