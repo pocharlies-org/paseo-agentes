@@ -189,3 +189,26 @@ test("a transcript created after the first look is found by the watch and wakes 
     h.limpia();
   }
 });
+
+test("nothing is watched until a client asks, and after REPOSO_MS without calls the watches close and the next caller gets everything", async () => {
+  const h = hogar();
+  let escaneos = 0;
+  const v = vigilia(h.raices, async () => (escaneos++, {}), 100);
+  try {
+    assert.equal(v.activa(), false, "loaded but nobody asked: no watch, no scan");
+    v.turno(A);
+    await espera(50);
+    assert.equal(escaneos, 0, "a turn's end with nobody watching scans nothing");
+    const { version } = await v.espera([A], 0);
+    assert.equal(v.activa(), true);
+    assert.equal(escaneos, 1);
+    await espera(250);
+    assert.equal(v.activa(), false, "no call for the rest period: the watches closed");
+    const despues = await v.espera([A], version);
+    assert.equal(despues.completo, true, "what changed while asleep is unknown: the caller gets everything again");
+    assert.equal(escaneos, 2);
+  } finally {
+    v.cierra();
+    h.limpia();
+  }
+});

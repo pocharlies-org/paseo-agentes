@@ -21,6 +21,7 @@ import { vigilantes } from "./vigilantes.ts";
 const RETENCION_MS = 20_000; // a held call answers by then: under the daemon's 30 s plugin request timeout
 const AVISO_MS = 2_000; // a running turn writes its transcript many times a second: it is read again at most this often
 const LECTURAS = 4; // reads of files or processes at once
+const REPOSO_MS = 60_000; // no held call for this long = no client shows the panel: the watches close (Dani 18-11)
 
 export interface Raices {
   readonly tasks: string;
@@ -43,12 +44,18 @@ export interface Vigilia {
   espera(sesiones: readonly string[], since: number): Promise<Panel>;
   /** The session's turn ended: its foreground commands are over, so the task files it still holds are its watchers. */
   turno(sesion: string): void;
+  /** Some client showed the panel within REPOSO_MS: the watches are open. */
+  activa(): boolean;
   cierra(): void;
 }
 
-export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: () => Promise<Record<string, number>> = () => vigilantes()): Vigilia {
+export function vigilia(
+  raices: Raices = raicesPorDefecto(),
+  contarVigilantes: () => Promise<Record<string, number>> = () => vigilantes(),
+  reposoMs = REPOSO_MS,
+): Vigilia {
   // A `since` from before this instance (the plugin was reloaded) is older than its start: that caller gets everything again.
-  const inicio = Date.now();
+  let inicio = Date.now();
   let version = inicio;
   let cerrada = false;
   const esperando = new Set<() => void>();
@@ -193,8 +200,32 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
       // A root that does not exist yet (no Claude Code session on this host so far): nothing to report until there is.
     }
   };
-  vigila(raices.tasks, (relativa) => marca(relativa.split(sep)[0] ?? ""));
-  vigila(raices.projects, deProyectos);
+  // Nothing is watched until a client asks, and the watches close when none has asked for REPOSO_MS: what was kept is dropped
+  // with them (no write would mark it any more), and the version jumps so the next caller's `since` reads as a new instance.
+  let abierta = false;
+  let enCurso = 0;
+  let reposo: ReturnType<typeof setTimeout> | null = null;
+  const abre = () => {
+    if (reposo) clearTimeout(reposo);
+    reposo = null;
+    if (abierta || cerrada) return;
+    abierta = true;
+    vigila(raices.tasks, (relativa) => marca(relativa.split(sep)[0] ?? ""));
+    vigila(raices.projects, deProyectos);
+  };
+  const duerme = () => {
+    reposo = null;
+    abierta = false;
+    for (const w of vigilantesFs.splice(0)) w.close();
+    if (ronda) clearTimeout(ronda);
+    ronda = null;
+    sucias.clear();
+    recontar.clear();
+    sesiones.clear();
+    indice = null;
+    vistos = null;
+    inicio = version = Math.max(version + 1, Date.now());
+  };
 
   const foto = async (pedidas: readonly string[], since: number): Promise<Panel> => {
     const enVersion = version; // a change while reading has a later version: the next call brings it (at worst twice)
@@ -208,26 +239,39 @@ export function vigilia(raices: Raices = raicesPorDefecto(), contarVigilantes: (
 
   return {
     async espera(pedidas, since) {
-      const hasta = Date.now() + RETENCION_MS;
-      for (;;) {
-        if (since !== version) {
-          const panel = await foto(pedidas, since);
-          if (panel.completo || panel.vigilantes || Object.keys(panel.sesiones).length > 0) return panel;
-          since = panel.version; // what moved was other clients' sessions: keep holding from here
-        }
-        const queda = hasta - Date.now();
-        if (cerrada || queda <= 0 || !(await retiene(queda))) return { sesiones: {}, version: since, completo: false };
+      abre();
+      enCurso++;
+      try {
+        return await sostiene(pedidas, since);
+      } finally {
+        if (--enCurso === 0 && !cerrada) reposo = setTimeout(duerme, reposoMs);
       }
     },
     turno(sesion) {
+      if (!abierta) return; // nobody shows the counts: the next panel call scans everything anyway
       recontar.add(sesion);
       programa();
     },
+    activa: () => abierta,
     cierra() {
       cerrada = true;
+      if (reposo) clearTimeout(reposo);
       for (const w of vigilantesFs) w.close();
       if (ronda) clearTimeout(ronda);
       despierta();
     },
   };
+
+  async function sostiene(pedidas: readonly string[], since: number): Promise<Panel> {
+    const hasta = Date.now() + RETENCION_MS;
+    for (;;) {
+      if (since !== version) {
+        const panel = await foto(pedidas, since);
+        if (panel.completo || panel.vigilantes || Object.keys(panel.sesiones).length > 0) return panel;
+        since = panel.version; // what moved was other clients' sessions: keep holding from here
+      }
+      const queda = hasta - Date.now();
+      if (cerrada || queda <= 0 || !(await retiene(queda))) return { sesiones: {}, version: since, completo: false };
+    }
+  }
 }

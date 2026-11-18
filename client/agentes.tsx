@@ -141,7 +141,7 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
 export function contributeAgentes(client: PluginClientContext): () => void {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], tareas: {}, contexto: {}, espera: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], tareas: {}, contexto: {}, espera: {}, plegado: { ...leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), bloque: true }, error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
@@ -187,120 +187,147 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     estados.set(agente.id, agente.status);
   };
 
-  const vigila = vigilaPanel(client.rpc, publica, lifetime.signal);
-
-  void client.paseo.agents
-    .list({ subscribe: {}, signal: lifetime.signal })
-    .then(({ subscription }) => {
-      subscription.subscribe({
-        snapshot: ({ entries }) => {
-          filas.clear();
-          for (const { agent, project } of entries) {
-            filas.set(agent.id, { ...agent, projectId: project.projectKey });
-            apunta(agent);
-          }
-          muestraFilas();
-          vigila([...filas.values()].map(sesionDe));
-        },
-        update: (message) => {
-          if (message.type !== "agent_update") return;
-          const update = message.payload;
-          if (update.kind === "remove") {
-            filas.delete(update.agentId);
-            terminos.delete(update.agentId);
-            estados.delete(update.agentId);
-          } else {
-            const projectId = update.project?.projectKey ?? filas.get(update.agent.id)?.projectId ?? null;
-            filas.set(update.agent.id, { ...update.agent, projectId });
-            apunta(update.agent);
-          }
-          muestraFilas();
-          vigila([...filas.values()].map(sesionDe));
-        },
-      });
-    })
-    .catch(falla);
-
-  // Re-read whole on every project event: they are rare, and a full list cannot drift the way patched entries can.
-  const leeProyectos = () => client.paseo.projects.list().then(({ projects }) => publica({ proyectos: projects }), falla);
-  const sueltaProyectos = client.paseo.projects.subscribe(() => void leeProyectos());
-  void leeProyectos();
-
-  // The daemon's workspace directory — the same one that feeds Paseo's sidebar, with its own status and time per workspace.
-  // shortcut: first page only, like the agents list; a host with more workspaces than one page holds is not this block's case.
-  const trabajos = new Map<string, Workspace>();
-  const recorta = (
-    w: {
-      id: string;
-      name: string;
-      projectId: string;
-      status: Workspace["status"];
-      statusEnteredAt: string | null;
-      projectRootPath?: string;
-      directory?: string;
-    } & RuntimeDeWorkspace,
-  ): Workspace => ({
-    id: w.id,
-    name: w.name,
-    projectId: w.projectId,
-    status: w.status,
-    statusEnteredAt: w.statusEnteredAt,
-    projectRootPath: w.projectRootPath,
-    directory: w.directory,
-    cambios: cambiosDe(w),
-  });
-  let sueltaTrabajos: (() => void) | null = null;
-  let suscripcionTrabajos: { release(): Promise<void> } | null = null;
-  void client.paseo.workspaces
-    .list({ subscribe: {} })
-    .then(({ subscription }) => {
-      if (lifetime.signal.aborted) return void subscription.release();
-      suscripcionTrabajos = subscription;
-      sueltaTrabajos = subscription.subscribe({
-        snapshot: ({ entries }) => {
-          trabajos.clear();
-          for (const w of entries) trabajos.set(w.id, recorta(w));
-          publica({ workspaces: new Map(trabajos) });
-        },
-        update: (message) => {
-          if (message.type !== "workspace_update") return;
-          const cambio = message.payload;
-          if (cambio.kind === "upsert") trabajos.set(cambio.workspace.id, recorta(cambio.workspace));
-          else trabajos.delete(cambio.id);
-          publica({ workspaces: new Map(trabajos) });
-        },
-      });
-    })
-    .catch(falla);
-
-  // Running Claude subagents (Task tool and workflows; background shells are not subagents for Paseo either), by parent and id.
-  // shortcut: the event stream has no snapshot, so a subagent already running when this loads shows from its next action or
-  // its end; upgrade if the plugin API gets a subagent list.
-  const subagentes = new Map<string, string>();
-  const muestraSubagentes = () => {
-    const porAgente = new Map<string, number>();
-    for (const padre of subagentes.values()) porAgente.set(padre, (porAgente.get(padre) ?? 0) + 1);
-    publica({ subagentes: porAgente });
+  // The data flows run only while some view shows the open block or the Explorer panel (Dani 18-11): a folded block costs the
+  // daemon nothing — no agent, workspace or project subscription, no held panel call — and opening it asks for everything again.
+  let usos = 0;
+  let para: (() => void) | null = null;
+  const usa = () => {
+    if (usos++ === 0) para = arranca();
+    return () => {
+      if (--usos > 0) return;
+      para?.();
+      para = null;
+    };
   };
-  client.paseo.observeEvents(["agent.provider_subagents.update"], { signal: lifetime.signal }).subscribe({
-    // Delivered again after a reconnect: whatever ended meanwhile must not stay running.
-    snapshot: () => {
-      subagentes.clear();
-      muestraSubagentes();
-    },
-    update: (message) => {
-      if (message.type !== "agent.provider_subagents.update") return;
-      const update = message.payload;
-      if (update.kind === "upsert") {
-        const clave = `${update.subagent.parentAgentId} ${update.subagent.id}`;
-        if (update.subagent.status === "running") subagentes.set(clave, update.subagent.parentAgentId);
-        else subagentes.delete(clave);
-      } else if (update.kind === "remove") subagentes.delete(`${update.parentAgentId} ${update.subagentId}`);
-      else return;
-      muestraSubagentes();
-    },
-    error: falla,
-  });
+  function arranca(): () => void {
+    const corre = new AbortController();
+    const senal = corre.signal;
+    const fallaAqui = (error: unknown) => {
+      if (!senal.aborted) falla(error);
+    };
+    publica({ error: null });
+    const vigila = vigilaPanel(client.rpc, publica, senal);
+
+    void client.paseo.agents
+      .list({ subscribe: {}, signal: senal })
+      .then(({ subscription }) => {
+        subscription.subscribe({
+          snapshot: ({ entries }) => {
+            filas.clear();
+            for (const { agent, project } of entries) {
+              filas.set(agent.id, { ...agent, projectId: project.projectKey });
+              apunta(agent);
+            }
+            muestraFilas();
+            vigila([...filas.values()].map(sesionDe));
+          },
+          update: (message) => {
+            if (message.type !== "agent_update") return;
+            const update = message.payload;
+            if (update.kind === "remove") {
+              filas.delete(update.agentId);
+              terminos.delete(update.agentId);
+              estados.delete(update.agentId);
+            } else {
+              const projectId = update.project?.projectKey ?? filas.get(update.agent.id)?.projectId ?? null;
+              filas.set(update.agent.id, { ...update.agent, projectId });
+              apunta(update.agent);
+            }
+            muestraFilas();
+            vigila([...filas.values()].map(sesionDe));
+          },
+        });
+      })
+      .catch(fallaAqui);
+
+    // Re-read whole on every project event: they are rare, and a full list cannot drift the way patched entries can.
+    const leeProyectos = () => client.paseo.projects.list().then(({ projects }) => publica({ proyectos: projects }), fallaAqui);
+    const sueltaProyectos = client.paseo.projects.subscribe(() => void leeProyectos());
+    void leeProyectos();
+
+    // The daemon's workspace directory — the same one that feeds Paseo's sidebar, with its own status and time per workspace.
+    // shortcut: first page only, like the agents list; a host with more workspaces than one page holds is not this block's case.
+    const trabajos = new Map<string, Workspace>();
+    const recorta = (
+      w: {
+        id: string;
+        name: string;
+        projectId: string;
+        status: Workspace["status"];
+        statusEnteredAt: string | null;
+        projectRootPath?: string;
+        directory?: string;
+      } & RuntimeDeWorkspace,
+    ): Workspace => ({
+      id: w.id,
+      name: w.name,
+      projectId: w.projectId,
+      status: w.status,
+      statusEnteredAt: w.statusEnteredAt,
+      projectRootPath: w.projectRootPath,
+      directory: w.directory,
+      cambios: cambiosDe(w),
+    });
+    let sueltaTrabajos: (() => void) | null = null;
+    let suscripcionTrabajos: { release(): Promise<void> } | null = null;
+    void client.paseo.workspaces
+      .list({ subscribe: {} })
+      .then(({ subscription }) => {
+        if (senal.aborted) return void subscription.release();
+        suscripcionTrabajos = subscription;
+        sueltaTrabajos = subscription.subscribe({
+          snapshot: ({ entries }) => {
+            trabajos.clear();
+            for (const w of entries) trabajos.set(w.id, recorta(w));
+            publica({ workspaces: new Map(trabajos) });
+          },
+          update: (message) => {
+            if (message.type !== "workspace_update") return;
+            const cambio = message.payload;
+            if (cambio.kind === "upsert") trabajos.set(cambio.workspace.id, recorta(cambio.workspace));
+            else trabajos.delete(cambio.id);
+            publica({ workspaces: new Map(trabajos) });
+          },
+        });
+      })
+      .catch(fallaAqui);
+
+    // Running Claude subagents (Task tool and workflows; background shells are not subagents for Paseo either), by parent and id.
+    // shortcut: the event stream has no snapshot, so a subagent already running when this loads shows from its next action or
+    // its end; upgrade if the plugin API gets a subagent list.
+    const subagentes = new Map<string, string>();
+    const muestraSubagentes = () => {
+      const porAgente = new Map<string, number>();
+      for (const padre of subagentes.values()) porAgente.set(padre, (porAgente.get(padre) ?? 0) + 1);
+      publica({ subagentes: porAgente });
+    };
+    client.paseo.observeEvents(["agent.provider_subagents.update"], { signal: senal }).subscribe({
+      // Delivered again after a reconnect: whatever ended meanwhile must not stay running.
+      snapshot: () => {
+        subagentes.clear();
+        muestraSubagentes();
+      },
+      update: (message) => {
+        if (message.type !== "agent.provider_subagents.update") return;
+        const update = message.payload;
+        if (update.kind === "upsert") {
+          const clave = `${update.subagent.parentAgentId} ${update.subagent.id}`;
+          if (update.subagent.status === "running") subagentes.set(clave, update.subagent.parentAgentId);
+          else subagentes.delete(clave);
+        } else if (update.kind === "remove") subagentes.delete(`${update.parentAgentId} ${update.subagentId}`);
+        else return;
+        muestraSubagentes();
+      },
+      error: fallaAqui,
+    });
+
+    return () => {
+      corre.abort();
+      sueltaProyectos();
+      sueltaTrabajos?.();
+      void suscripcionTrabajos?.release();
+    };
+  }
 
   const suscribe = (aviso: () => void) => {
     avisos.add(aviso);
@@ -379,12 +406,17 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       const ws = agente.workspaceId ? workspaces.get(agente.workspaceId) : undefined;
       return tipoDe(ws?.directory ?? ws?.projectRootPath);
     };
-    // A relative time goes stale while nothing else moves: wake the block once a minute.
+    // Every load starts folded (Dani 18-11: the block is not always used); folded it draws its title alone and asks for nothing.
+    // The Explorer panel is opened on purpose, so it always shows.
+    const cerrado = !enPanel && plegado.bloque;
+    useEffect(() => (cerrado ? undefined : usa()), [cerrado]);
+    // A relative time goes stale while nothing else moves: wake the open block once a minute.
     const [, despierta] = useState(0);
     useEffect(() => {
+      if (cerrado) return undefined;
       const id = setInterval(() => despierta((numero) => numero + 1), 60_000);
       return () => void clearInterval(id);
-    }, []);
+    }, [cerrado]);
     // The filter is per project, after grouping so it hides rows and never a parent its children depend on; an agent whose
     // project is unknown is never hidden by it.
     const visibles = (filas: readonly Fila[]) => filas.filter((agente) => !agente.projectId || !plegado.ocultos.includes(agente.projectId));
@@ -596,7 +628,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         >
           <Pliegue size={12} color={tenue} />
           <Text style={[texto, { flex: 1 }]}>Agentes</Text>
-          {modo === "espera" ? (
+          {cerrado ? null : modo === "espera" ? (
             // Contador estático: en esta vista no hay grupos que filtrar.
             <Text style={texto}>{filas.length}</Text>
           ) : (
@@ -621,8 +653,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
               );
             })
           )}
-          <BotonesPlegar label="todo" color={tenue} onPlegar={() => pliegaTodo(true)} onDesplegar={() => pliegaTodo(false)} />
-          {ajustes.status === "ready" ? (
+          {cerrado ? null : <BotonesPlegar label="todo" color={tenue} onPlegar={() => pliegaTodo(true)} onDesplegar={() => pliegaTodo(false)} />}
+          {!cerrado && ajustes.status === "ready" ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Cambiar a ${NOMBRE_MODO[SIGUIENTE[modo]]}`}
@@ -634,8 +666,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
             </Pressable>
           ) : null}
         </Pressable>
-        {error ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
-        {plegado.bloque ? null : (
+        {error && !cerrado ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
+        {cerrado ? null : (
           <ScrollView style={enPanel ? { flex: 1 } : { maxHeight: Math.round(height * 0.6) }}>
             {modo === "espera" ? null : (
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingLeft: 16, paddingTop: 4, paddingBottom: 4 }}>
@@ -779,9 +811,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   client.addSettingsScreen({ id: "ajustes", title: "Ajustes", icon: "Settings", Component: AjustesAgentes });
   return () => {
     lifetime.abort();
-    sueltaProyectos();
-    sueltaTrabajos?.();
-    void suscripcionTrabajos?.release();
+    para?.();
   };
 }
 
