@@ -134,7 +134,7 @@ interface Foto {
 }
 
 const CLAVE_PLEGADO = "paseo-agentes:plegado";
-// The fold outlives a reload where there is localStorage (web and desktop); on the phone it lasts until the app closes.
+// The fold, but for the block's own (every load starts it folded), outlives a reload where there is localStorage (web and desktop); on the phone it lasts until the app closes.
 const almacen = (globalThis as { localStorage?: { getItem(clave: string): string | null; setItem(clave: string, valor: string): void } })
   .localStorage;
 
