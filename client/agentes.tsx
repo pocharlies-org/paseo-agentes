@@ -280,9 +280,12 @@ function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clave
     let suscripcionTrabajos: { release(): Promise<void> } | null = null;
     void api.workspaces
       .list({ subscribe: {} })
-      .then(({ subscription }) => {
+      .then(({ subscription, entries }) => {
         if (senal.aborted) return void subscription.release();
         suscripcionTrabajos = subscription;
+        // The first page comes with the answer: a borrowed host's subscription does not replay its snapshot to a late listener.
+        for (const w of entries) trabajos.set(w.id, recorta(w));
+        publica({ workspaces: new Map(trabajos) });
         sueltaTrabajos = subscription.subscribe({
           snapshot: ({ entries }) => {
             trabajos.clear();
