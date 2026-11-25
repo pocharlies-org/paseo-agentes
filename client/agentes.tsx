@@ -466,6 +466,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
     const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
+    if (agentes.length) console.error("DEBUG-SC6418 cruce", host.id, workspaces.size, agentes.slice(0, 4).map((a) => `${a.workspaceId}:${workspaces.has(a.workspaceId ?? "")}`).join(" "), [...workspaces.keys()].slice(0, 3).join(" "));
     const enMarcha = useMemo(() => enMarchaPorFila(agentes, subagentes, vigilantes), [agentes, subagentes, vigilantes]);
     // Compañía, Hermes o en vivo, por el directorio de su workspace (SC-4800).
     const tipoDeFila = (agente: Fila): Tipo => {
