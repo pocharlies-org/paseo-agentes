@@ -6,7 +6,6 @@ import type {
   PluginSurfaceProps,
   PluginWorkspacePanelProps,
 } from "@getpaseo/plugin/client";
-import type { PaseoApi } from "@getpaseo/client";
 import { getPaseoClient, useHosts, useSettings } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SettingsCard, SettingsSection, SettingsSelect, SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
@@ -140,7 +139,8 @@ const almacen = (globalThis as { localStorage?: { getItem(clave: string): string
   .localStorage;
 
 /** What the block reads of a host's Paseo: the plugin's own `client.paseo`, or another host's borrowed API. */
-type ApiHost = Pick<PaseoApi, "agents" | "projects" | "workspaces" | "providers" | "observeEvents">;
+// The plugin compiler refuses `@getpaseo/client` in client code, types included: the shape comes through the plugin SDK.
+type ApiHost = Pick<ReturnType<typeof getPaseoClient>, "agents" | "projects" | "workspaces" | "providers" | "observeEvents">;
 
 /**
  * One host's data: its agents, workspaces, projects and subagents, kept by Paseo's own subscriptions while some view shows them.
