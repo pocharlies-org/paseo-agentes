@@ -515,6 +515,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           .filter((proyecto) => proyecto.workspaces.length > 0),
       [agentes, subagentes, workspaces, proyectos, plegado.ocultos, plegado.filtro],
     );
+    if (porProy.length) console.error("DEBUG-SC6418 porProy", host.id, JSON.stringify(porProy.slice(0, 3).map((p) => [p.proyecto?.projectId ?? null, p.workspaces.map((w) => w.workspace?.id ?? null)])));
     // One chip per project with rows, most crowded first: its badge toggles the project in and out.
     const fichas = useMemo(() => {
       const conteo = new Map<string, number>();
