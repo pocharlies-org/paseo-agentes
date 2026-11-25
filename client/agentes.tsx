@@ -355,11 +355,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   const lifetime = new AbortController();
   // One store per host, made the first time a view asks for it: the plugin's own host with its server, the rest borrowed.
   const almacenes = new Map<string, Almacen>();
-  let propio: string | null = null;
   const almacenDe = (serverId: string, esPropio: boolean): Almacen => {
     let hecho = almacenes.get(serverId);
     if (!hecho) {
-      if (esPropio) propio = serverId;
       // The own host keeps the fold key it always had; another host's fold is its own.
       hecho = esPropio
         ? creaAlmacen(client.paseo, client.rpc, CLAVE_PLEGADO, lifetime.signal)
