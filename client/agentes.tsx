@@ -285,9 +285,11 @@ function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clave
         suscripcionTrabajos = subscription;
         // The first page comes with the answer: a borrowed host's subscription does not replay its snapshot to a late listener.
         for (const w of entries) trabajos.set(w.id, recorta(w));
+        console.error("DEBUG-SC6418 workspaces", clavePlegado, entries.length);
         publica({ workspaces: new Map(trabajos) });
         sueltaTrabajos = subscription.subscribe({
           snapshot: ({ entries }) => {
+            console.error("DEBUG-SC6418 snapshot", clavePlegado, entries.length);
             trabajos.clear();
             for (const w of entries) trabajos.set(w.id, recorta(w));
             publica({ workspaces: new Map(trabajos) });
