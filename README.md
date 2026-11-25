@@ -1,6 +1,6 @@
 # paseo-agentes
 
-A Paseo plugin: one block with every agent of the host, grouped by the states Paseo itself computes — the agents
+A Paseo plugin: one block with every agent of every connected host, grouped by the states Paseo itself computes — the agents
 asking you something, the ones running, the ones that finished and nobody has looked at — by project and workspace,
 with the workspace's own status and time on its header and the state groups inside, like Paseo's sidebar; or in the
 simple view «Solo lo que te espera»: only the agents waiting for you — questions, errors and unanswered «PARA DANI:» —

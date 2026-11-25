@@ -1,7 +1,7 @@
 # paseo-agentes — agents by status, in one block
 
 Paseo's sidebar lists workspaces and its status view groups **workspaces**, not agents. With one workspace per area,
-you cannot see *which* agent is waiting for you. This plugin adds a block that lists every agent of the host, grouped
+you cannot see *which* agent is waiting for you. This plugin adds a block that lists every agent of every connected host, grouped
 by exactly the states Paseo already computes: the ones asking you something, the ones running, the ones that finished
 and nobody has looked at. One row opens its agent.
 
