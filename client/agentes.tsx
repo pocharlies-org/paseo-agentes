@@ -6,7 +6,8 @@ import type {
   PluginSurfaceProps,
   PluginWorkspacePanelProps,
 } from "@getpaseo/plugin/client";
-import { useSettings } from "@getpaseo/plugin/client";
+import type { PaseoApi } from "@getpaseo/client";
+import { getPaseoClient, useHosts, useSettings } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SettingsCard, SettingsSection, SettingsSelect, SidebarRow, SidebarSeparator } from "@getpaseo/plugin/client/ui";
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -138,26 +139,33 @@ const CLAVE_PLEGADO = "paseo-agentes:plegado";
 const almacen = (globalThis as { localStorage?: { getItem(clave: string): string | null; setItem(clave: string, valor: string): void } })
   .localStorage;
 
-export function contributeAgentes(client: PluginClientContext): () => void {
+/** What the block reads of a host's Paseo: the plugin's own `client.paseo`, or another host's borrowed API. */
+type ApiHost = Pick<PaseoApi, "agents" | "projects" | "workspaces" | "providers" | "observeEvents">;
+
+/**
+ * One host's data: its agents, workspaces, projects and subagents, kept by Paseo's own subscriptions while some view shows them.
+ * `rpc` is this plugin's server on that host: only the plugin's own host has one here (the SDK reaches another host's Paseo, not
+ * its plugins), so another host's rows go without watchers, tasks, context and wait chips.
+ */
+function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clavePlegado: string, lifetime: AbortSignal) {
   const filas = new Map<string, Fila>();
   const avisos = new Set<() => void>();
-  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], tareas: {}, contexto: {}, espera: {}, plegado: leePlegado(almacen?.getItem(CLAVE_PLEGADO) ?? null), error: null };
+  let foto: Foto = { agentes: [], subagentes: new Map(), vigilantes: {}, workspaces: new Map(), proyectos: [], tareas: {}, contexto: {}, espera: {}, plegado: leePlegado(almacen?.getItem(clavePlegado) ?? null), error: null };
   const publica = (cambio: Partial<Foto>) => {
     foto = { ...foto, ...cambio };
     for (const aviso of avisos) aviso();
   };
   const muestraFilas = () => publica({ agentes: [...filas.values()] });
-  const lifetime = new AbortController();
   // Said in the sidebar: an empty list would read as nothing pending.
   const falla = (error: unknown) => {
-    if (!lifetime.signal.aborted) publica({ error: error instanceof Error ? error.message : String(error) });
+    if (!lifetime.aborted) publica({ error: error instanceof Error ? error.message : String(error) });
   };
 
   // The + buttons create through Paseo's own API. The daemon wants `config.provider` as "provider/model", so the default
   // comes from the provider snapshot: the first enabled provider's default (else first selectable) model.
   // shortcut: an empty workspace would not draw (the list is born from the agents), so +workspace creates it with its first agent.
   const conProveedor = (hacer: (config: { provider: string }) => Promise<unknown>) =>
-    client.paseo.providers
+    api.providers
       .snapshot()
       .then(({ entries }) => {
         const entrada = entries.find((e) => e.enabled && !e.error && e.models?.length);
@@ -167,10 +175,10 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       })
       .catch(falla);
   const nuevoAgente = (workspaceId: string) =>
-    conProveedor((config) => client.paseo.workspaces.ref(workspaceId).agents.create({ config }));
+    conProveedor((config) => api.workspaces.ref(workspaceId).agents.create({ config }));
   const nuevoWorkspace = (proyecto: Proyecto) =>
     conProveedor((config) =>
-      client.paseo.workspaces.create({
+      api.workspaces.create({
         source: { kind: "directory", path: proyecto.projectRootPath, projectId: proyecto.projectId },
         agent: { cwd: proyecto.projectRootPath, config },
       }),
@@ -206,9 +214,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       if (!senal.aborted) falla(error);
     };
     publica({ error: null });
-    const vigila = vigilaPanel(client.rpc, publica, senal);
+    const vigila = rpc ? vigilaPanel(rpc, publica, senal) : () => undefined;
 
-    void client.paseo.agents
+    void api.agents
       .list({ subscribe: {}, signal: senal })
       .then(({ subscription }) => {
         subscription.subscribe({
@@ -241,8 +249,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       .catch(fallaAqui);
 
     // Re-read whole on every project event: they are rare, and a full list cannot drift the way patched entries can.
-    const leeProyectos = () => client.paseo.projects.list().then(({ projects }) => publica({ proyectos: projects }), fallaAqui);
-    const sueltaProyectos = client.paseo.projects.subscribe(() => void leeProyectos());
+    const leeProyectos = () => api.projects.list().then(({ projects }) => publica({ proyectos: projects }), fallaAqui);
+    const sueltaProyectos = api.projects.subscribe(() => void leeProyectos());
     void leeProyectos();
 
     // The daemon's workspace directory — the same one that feeds Paseo's sidebar, with its own status and time per workspace.
@@ -270,7 +278,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     });
     let sueltaTrabajos: (() => void) | null = null;
     let suscripcionTrabajos: { release(): Promise<void> } | null = null;
-    void client.paseo.workspaces
+    void api.workspaces
       .list({ subscribe: {} })
       .then(({ subscription }) => {
         if (senal.aborted) return void subscription.release();
@@ -301,7 +309,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       for (const padre of subagentes.values()) porAgente.set(padre, (porAgente.get(padre) ?? 0) + 1);
       publica({ subagentes: porAgente });
     };
-    client.paseo.observeEvents(["agent.provider_subagents.update"], { signal: senal }).subscribe({
+    api.observeEvents(["agent.provider_subagents.update"], { signal: senal }).subscribe({
       // Delivered again after a reconnect: whatever ended meanwhile must not stay running.
       snapshot: () => {
         subagentes.clear();
@@ -336,7 +344,29 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   const lee = () => foto;
   const pliega = (plegado: Plegado) => {
     publica({ plegado });
-    almacen?.setItem(CLAVE_PLEGADO, JSON.stringify(plegado));
+    almacen?.setItem(clavePlegado, JSON.stringify(plegado));
+  };
+  const suelta = () => para?.();
+  return { suscribe, lee, usa, pliega, terminos, nuevoAgente, nuevoWorkspace, suelta };
+}
+type Almacen = ReturnType<typeof creaAlmacen>;
+
+export function contributeAgentes(client: PluginClientContext): () => void {
+  const lifetime = new AbortController();
+  // One store per host, made the first time a view asks for it: the plugin's own host with its server, the rest borrowed.
+  const almacenes = new Map<string, Almacen>();
+  let propio: string | null = null;
+  const almacenDe = (serverId: string, esPropio: boolean): Almacen => {
+    let hecho = almacenes.get(serverId);
+    if (!hecho) {
+      if (esPropio) propio = serverId;
+      // The own host keeps the fold key it always had; another host's fold is its own.
+      hecho = esPropio
+        ? creaAlmacen(client.paseo, client.rpc, CLAVE_PLEGADO, lifetime.signal)
+        : creaAlmacen(getPaseoClient(serverId), null, `${CLAVE_PLEGADO}:${serverId}`, lifetime.signal);
+      almacenes.set(serverId, hecho);
+    }
+    return hecho;
   };
 
   // The setting only decides whether the sidebar shows the block. The Explorer panel stays registered on either side: a panel
@@ -344,13 +374,13 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   function AgentesItem({ theme, host, openScreen }: PluginSidebarItemProps) {
     const ajustes = useSettings(ajustesAgentes);
     if (ajustes.status === "ready" && ajustes.values.lado === "derecha") return null;
-    const abre = (agentId: string) => openScreen({ screenId: "abrir", params: { agentId } });
+    const abre = (agentId: string, serverId: string) => openScreen({ screenId: "abrir", params: { agentId, serverId } });
     return <Bloque theme={theme} host={host} abre={abre} enPanel={false} />;
   }
 
   // Panels get navigation, so a row opens its agent directly.
   function PanelAgentes({ theme, host, navigation, workspaceId }: PluginWorkspacePanelProps) {
-    return <Bloque theme={theme} host={host} abre={(agentId) => navigation?.openAgent({ agentId })} enPanel workspaceId={workspaceId} />;
+    return <Bloque theme={theme} host={host} abre={(agentId, serverId) => navigation?.openAgent({ agentId, serverId })} enPanel workspaceId={workspaceId} />;
   }
 
   function AjustesAgentes({ theme }: PluginSurfaceProps) {
@@ -393,7 +423,38 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     );
   }
 
-  function Bloque({ theme, host, abre, enPanel, workspaceId }: Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string): void; enPanel: boolean; workspaceId?: string }) {
+  type PropsBloque = Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string, serverId: string): void; enPanel: boolean; workspaceId?: string };
+
+  // Every connected host, the plugin's own first, one section each (Dani 25-11: the block showed only the host it was drawn
+  // from). Alone, the block is what it always was.
+  function Bloque({ theme, host, abre, enPanel, workspaceId }: PropsBloque) {
+    const hosts = useHosts();
+    const otros = hosts.filter((h) => h.serverId !== host.id && h.status === "online");
+    const propioBloque = (
+      <BloqueHost theme={theme} host={host} abre={abre} enPanel={enPanel} workspaceId={workspaceId} almacen={almacenDe(host.id, true)} etiqueta={otros.length > 0 ? host.label : null} partes={otros.length + 1} />
+    );
+    if (otros.length === 0) return propioBloque;
+    const secciones = [
+      propioBloque,
+      ...otros.map((h) => (
+        <BloqueHost
+          key={h.serverId}
+          theme={theme}
+          host={{ ...host, id: h.serverId, label: h.label }}
+          abre={abre}
+          enPanel={enPanel}
+          almacen={almacenDe(h.serverId, false)}
+          etiqueta={h.label}
+          partes={otros.length + 1}
+        />
+      )),
+    ];
+    return enPanel ? <ScrollView style={{ flex: 1 }}>{secciones}</ScrollView> : <View>{secciones}</View>;
+  }
+
+  function BloqueHost({ theme, host, abre: abreEn, enPanel, workspaceId, almacen: datos, etiqueta, partes }: PropsBloque & { almacen: Almacen; etiqueta: string | null; partes: number }) {
+    const { suscribe, lee, usa, pliega, terminos, nuevoAgente, nuevoWorkspace } = datos;
+    const abre = (agentId: string) => abreEn(agentId, host.id);
     const { agentes, subagentes, vigilantes, workspaces, proyectos, tareas, contexto, espera, plegado, error } = useSyncExternalStore(suscribe, lee);
     const ajustes = useSettings(ajustesAgentes);
     const modo: Agrupar = ajustes.status === "ready" ? ajustes.values.agrupar : "estado";
@@ -469,7 +530,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const totalTareas = filasConTareas.reduce((numero, agente) => numero + (tareas[sesionDe(agente)]?.length ?? 0), 0);
     // Folded, the sidebar block has no data: its title still shows, or it could never be opened.
     if (enPanel && !error && todos.length === 0) {
-      return <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>Ningún agente.</Text>;
+      return <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 16 }}>{etiqueta ? `Ningún agente en ${etiqueta}.` : "Ningún agente."}</Text>;
     }
     const tenue = theme.colors.foregroundMuted;
     // The letter setting scales the size and the air of every row at once.
@@ -619,7 +680,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
       );
     };
     return (
-      <View style={enPanel ? { flex: 1, paddingTop: 8 } : undefined}>
+      <View style={enPanel && partes === 1 ? { flex: 1, paddingTop: 8 } : enPanel ? { paddingTop: 8 } : undefined}>
         {enPanel ? null : <SidebarSeparator />}
         <Pressable
           accessibilityRole="button"
@@ -628,7 +689,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           style={[linea, { paddingRight: 16 }]}
         >
           <Pliegue size={12} color={tenue} />
-          <Text style={[texto, { flex: 1 }]}>Agentes</Text>
+          <Text style={[texto, { flex: 1 }]} numberOfLines={1}>{etiqueta ? `Agentes · ${etiqueta}` : "Agentes"}</Text>
           {cerrado ? null : modo === "espera" ? (
             // Contador estático: en esta vista no hay grupos que filtrar.
             <Text style={texto}>{filas.length}</Text>
@@ -669,7 +730,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
         </Pressable>
         {error && !cerrado ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
         {cerrado ? null : (
-          <ScrollView style={enPanel ? { flex: 1 } : { maxHeight: Math.round(height * 0.6) }}>
+          // Several hosts share the space: the panel scrolls them all at once, the sidebar gives each its share of the height.
+          <ScrollView style={enPanel ? (partes === 1 ? { flex: 1 } : undefined) : { maxHeight: Math.round((height * 0.6) / partes) }} scrollEnabled={!enPanel || partes === 1}>
             {modo === "espera" ? null : (
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingLeft: 16, paddingTop: 4, paddingBottom: 4 }}>
               {fichas.map(([projectId, numero]) => {
@@ -812,7 +874,7 @@ export function contributeAgentes(client: PluginClientContext): () => void {
   client.addSettingsScreen({ id: "ajustes", title: "Ajustes", icon: "Settings", Component: AjustesAgentes });
   return () => {
     lifetime.abort();
-    para?.();
+    for (const hecho of almacenes.values()) hecho.suelta();
   };
 }
 
@@ -1054,10 +1116,10 @@ function iconoDe(grupo: Grupo, theme: PluginHostProps["theme"]): Dibujo {
 // screen opens the agent; Paseo's workspace navigation pops back to the host route, so the screen does not stay in the history.
 // Once PluginSidebarItemProps carries navigation, call openAgent from the row and drop this screen.
 function AbrirAgente({ params, navigation, theme }: PluginScreenProps) {
-  const agentId = params.agentId;
+  const { agentId, serverId } = params;
   useEffect(() => {
-    if (agentId) navigation?.openAgent({ agentId });
-  }, [agentId, navigation]);
+    if (agentId) navigation?.openAgent({ agentId, ...(serverId ? { serverId } : {}) });
+  }, [agentId, serverId, navigation]);
   if (navigation) return null;
   return <Text style={{ color: theme.colors.foregroundMuted, padding: 24 }}>Esta versión de Paseo no deja abrir un agente desde un plugin.</Text>;
 }
