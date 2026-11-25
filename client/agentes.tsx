@@ -249,7 +249,7 @@ function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clave
       .catch(fallaAqui);
 
     // Re-read whole on every project event: they are rare, and a full list cannot drift the way patched entries can.
-    const leeProyectos = () => api.projects.list().then(({ projects }) => publica({ proyectos: projects }), fallaAqui);
+    const leeProyectos = () => api.projects.list().then((r) => { console.error("DEBUG-SC6418 proyectos", clavePlegado, JSON.stringify(r).slice(0, 600)); publica({ proyectos: r.projects }); }, fallaAqui);
     const sueltaProyectos = api.projects.subscribe(() => void leeProyectos());
     void leeProyectos();
 
@@ -285,7 +285,7 @@ function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clave
         suscripcionTrabajos = subscription;
         // The first page comes with the answer: a borrowed host's subscription does not replay its snapshot to a late listener.
         for (const w of entries) trabajos.set(w.id, recorta(w));
-        console.error("DEBUG-SC6418 workspaces", clavePlegado, entries.length);
+        console.error("DEBUG-SC6418 workspaces", clavePlegado, entries.length, JSON.stringify(entries[0]).slice(0, 500));
         publica({ workspaces: new Map(trabajos) });
         sueltaTrabajos = subscription.subscribe({
           snapshot: ({ entries }) => {
