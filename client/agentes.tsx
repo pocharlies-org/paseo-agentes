@@ -249,7 +249,7 @@ function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clave
       .catch(fallaAqui);
 
     // Re-read whole on every project event: they are rare, and a full list cannot drift the way patched entries can.
-    const leeProyectos = () => api.projects.list().then((r) => { console.error("DEBUG-SC6418 proyectos", clavePlegado, JSON.stringify(r).slice(0, 600)); publica({ proyectos: r.projects }); }, fallaAqui);
+    const leeProyectos = () => api.projects.list().then(({ projects }) => publica({ proyectos: projects }), fallaAqui);
     const sueltaProyectos = api.projects.subscribe(() => void leeProyectos());
     void leeProyectos();
 
@@ -280,16 +280,11 @@ function creaAlmacen(api: ApiHost, rpc: PluginClientContext["rpc"] | null, clave
     let suscripcionTrabajos: { release(): Promise<void> } | null = null;
     void api.workspaces
       .list({ subscribe: {} })
-      .then(({ subscription, entries }) => {
+      .then(({ subscription }) => {
         if (senal.aborted) return void subscription.release();
         suscripcionTrabajos = subscription;
-        // The first page comes with the answer: a borrowed host's subscription does not replay its snapshot to a late listener.
-        for (const w of entries) trabajos.set(w.id, recorta(w));
-        console.error("DEBUG-SC6418 workspaces", clavePlegado, entries.length, JSON.stringify(entries[0]).slice(0, 500));
-        publica({ workspaces: new Map(trabajos) });
         sueltaTrabajos = subscription.subscribe({
           snapshot: ({ entries }) => {
-            console.error("DEBUG-SC6418 snapshot", clavePlegado, entries.length);
             trabajos.clear();
             for (const w of entries) trabajos.set(w.id, recorta(w));
             publica({ workspaces: new Map(trabajos) });
@@ -466,7 +461,6 @@ export function contributeAgentes(client: PluginClientContext): () => void {
     const iconos = useMemo(() => insignias(host.id, proyectos), [host.id, proyectos]);
     const { height } = useWindowDimensions();
     const todos = useMemo(() => agrupar(agentes, subagentes), [agentes, subagentes]);
-    if (agentes.length) console.error("DEBUG-SC6418 cruce", host.id, workspaces.size, agentes.slice(0, 4).map((a) => `${a.workspaceId}:${workspaces.has(a.workspaceId ?? "")}`).join(" "), [...workspaces.keys()].slice(0, 3).join(" "));
     const enMarcha = useMemo(() => enMarchaPorFila(agentes, subagentes, vigilantes), [agentes, subagentes, vigilantes]);
     // Compañía, Hermes o en vivo, por el directorio de su workspace (SC-4800).
     const tipoDeFila = (agente: Fila): Tipo => {
@@ -515,7 +509,6 @@ export function contributeAgentes(client: PluginClientContext): () => void {
           .filter((proyecto) => proyecto.workspaces.length > 0),
       [agentes, subagentes, workspaces, proyectos, plegado.ocultos, plegado.filtro],
     );
-    if (porProy.length) console.error("DEBUG-SC6418 porProy", host.id, enPanel, workspaces.size, proyectos.length, JSON.stringify(porProy.slice(0, 2).map((p) => [p.proyecto?.projectDisplayName ?? null, p.workspaces.slice(0, 2).map((w) => w.workspace?.name ?? null)])));
     // One chip per project with rows, most crowded first: its badge toggles the project in and out.
     const fichas = useMemo(() => {
       const conteo = new Map<string, number>();
