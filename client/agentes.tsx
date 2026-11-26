@@ -428,8 +428,8 @@ export function contributeAgentes(client: PluginClientContext): () => void {
 
   type PropsBloque = Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string, serverId: string): void; enPanel: boolean; workspaceId?: string };
 
-  // Every connected host, the plugin's own first, one section each (Dani 25-11: the block showed only the host it was drawn
-  // from). Alone, the block is what it always was.
+  // Every connected host not hidden, the plugin's own first, one section each (Dani 25-11: the block showed only the host it was
+  // drawn from). Alone, the block is what it always was.
   function Bloque({ theme, host, abre, enPanel, workspaceId }: PropsBloque) {
     const hosts = useHosts();
     const otros = hosts.filter((h) => h.serverId !== host.id && h.status === "online");
