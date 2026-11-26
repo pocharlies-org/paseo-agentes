@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agrupar, cambiosDe, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leePlegado, porProyecto, porWorkspace, sesionDe, tipoDe, tokensDe, type Agente } from "../shared/agentes.ts";
+import { agrupar, cambiosDe, enMarchaPorFila, filasEspera, grupoDe, hace, insignias, leeHostsOcultos, leePlegado, porProyecto, porWorkspace, sesionDe, tipoDe, tokensDe, type Agente } from "../shared/agentes.ts";
 
 const agente = (id: string, extra: Partial<Agente> = {}): Agente => ({
   id,
@@ -279,4 +279,12 @@ test("tokens: what the provider reports wins; the transcript fills the rest", ()
   assert.equal(tokensDe({ lastUsage: { contextWindowUsedTokens: 0 } }, 1000), 1000);
   assert.equal(tokensDe({}, 1000), 1000);
   assert.equal(tokensDe({ lastUsage: null }, undefined), undefined);
+});
+
+test("leeHostsOcultos: the stored list of hidden hosts; anything broken reads as none hidden", () => {
+  assert.deepEqual(leeHostsOcultos('["srv_a","srv_b"]'), ["srv_a", "srv_b"]);
+  assert.deepEqual(leeHostsOcultos('["srv_a", 3, null]'), ["srv_a"]);
+  assert.deepEqual(leeHostsOcultos(null), []);
+  assert.deepEqual(leeHostsOcultos("{roto"), []);
+  assert.deepEqual(leeHostsOcultos('{"a":1}'), []);
 });

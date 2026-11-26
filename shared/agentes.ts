@@ -339,6 +339,16 @@ export interface Plegado {
   readonly tareas: boolean;
 }
 
+/** The hosts hidden from the block, as stored (a JSON list of server ids); anything else reads as none hidden. */
+export function leeHostsOcultos(texto: string | null): string[] {
+  try {
+    const valor: unknown = JSON.parse(texto ?? "[]");
+    return Array.isArray(valor) ? valor.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** The fold as stored, read defensively: the storage is shared with Paseo and anything else on its origin. */
 export function leePlegado(texto: string | null): Plegado {
   let valor: { bloque?: unknown; grupos?: unknown; workspaces?: unknown; proyectos?: unknown; ocultos?: unknown; filtro?: unknown; cambios?: unknown; tareas?: unknown } | null = null;

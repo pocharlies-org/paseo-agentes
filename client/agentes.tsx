@@ -19,6 +19,7 @@ import {
   grupoDe,
   hace,
   insignias,
+  leeHostsOcultos,
   leePlegado,
   porProyecto,
   sesionDe,
@@ -90,6 +91,9 @@ function BotonesPlegar({ label, color, onPlegar, onDesplegar }: { label: string;
   );
 }
 const ABIERTO = icono("ChevronDown");
+const ICONO_HOSTS = icono("Eye");
+const ICONO_VISTO = icono("SquareCheck");
+const ICONO_OCULTO = icono("Square");
 const CERRADO = icono("ChevronRight");
 
 // A row's icon has to be a component: one per initial and color, so a row keeps its element across renders.
@@ -134,6 +138,7 @@ interface Foto {
 }
 
 const CLAVE_PLEGADO = "paseo-agentes:plegado";
+const CLAVE_HOSTS = "paseo-agentes:hosts-ocultos";
 // The fold, but for the block's own (every load starts it folded), outlives a reload where there is localStorage (web and desktop); on the phone it lasts until the app closes.
 const almacen = (globalThis as { localStorage?: { getItem(clave: string): string | null; setItem(clave: string, valor: string): void } })
   .localStorage;
@@ -423,34 +428,81 @@ export function contributeAgentes(client: PluginClientContext): () => void {
 
   type PropsBloque = Pick<PluginHostProps, "theme" | "host"> & { abre(agentId: string, serverId: string): void; enPanel: boolean; workspaceId?: string };
 
-  // Every connected host, the plugin's own first, one section each (Dani 25-11: the block showed only the host it was drawn
-  // from). Alone, the block is what it always was.
+  // Every connected host not hidden, the plugin's own first, one section each (Dani 25-11: the block showed only the host it was
+  // drawn from). Alone, the block is what it always was.
   function Bloque({ theme, host, abre, enPanel, workspaceId }: PropsBloque) {
     const hosts = useHosts();
     const otros = hosts.filter((h) => h.serverId !== host.id && h.status === "online");
-    const propioBloque = (
-      <BloqueHost theme={theme} host={host} abre={abre} enPanel={enPanel} workspaceId={workspaceId} almacen={almacenDe(host.id, true)} etiqueta={otros.length > 0 ? host.label : null} partes={otros.length + 1} />
+    // Which hosts show is chosen from the first section's eye button (Dani 26-11); kept in this app, like the fold.
+    const [ocultos, setOcultos] = useState(() => leeHostsOcultos(almacen?.getItem(CLAVE_HOSTS) ?? null));
+    const [menu, setMenu] = useState(false);
+    if (otros.length === 0) {
+      return <BloqueHost theme={theme} host={host} abre={abre} enPanel={enPanel} workspaceId={workspaceId} almacen={almacenDe(host.id, true)} etiqueta={null} partes={1} />;
+    }
+    const todos = [{ serverId: host.id, label: host.label }, ...otros];
+    const alterna = (serverId: string) => {
+      const nuevos = ocultos.includes(serverId) ? ocultos.filter((id) => id !== serverId) : [...ocultos, serverId];
+      setOcultos(nuevos);
+      almacen?.setItem(CLAVE_HOSTS, JSON.stringify(nuevos));
+    };
+    const tenue = theme.colors.foregroundMuted;
+    const boton = (
+      <Pressable accessibilityRole="button" accessibilityLabel="Elegir qué hosts se ven" hitSlop={6} onPress={() => setMenu((abierto) => !abierto)} style={{ marginLeft: 8 }}>
+        <ICONO_HOSTS size={12} color={menu ? theme.colors.foreground : tenue} />
+      </Pressable>
     );
-    if (otros.length === 0) return propioBloque;
-    const secciones = [
-      propioBloque,
-      ...otros.map((h) => (
-        <BloqueHost
-          key={h.serverId}
-          theme={theme}
-          host={{ ...host, id: h.serverId, label: h.label }}
-          abre={abre}
-          enPanel={enPanel}
-          almacen={almacenDe(h.serverId, false)}
-          etiqueta={h.label}
-          partes={otros.length + 1}
-        />
-      )),
-    ];
+    const lista = menu ? (
+      <View style={{ paddingLeft: 32, paddingRight: 16, paddingBottom: 4 }}>
+        {todos.map((h) => {
+          const visible = !ocultos.includes(h.serverId);
+          const Marca = visible ? ICONO_VISTO : ICONO_OCULTO;
+          return (
+            <Pressable
+              key={h.serverId}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: visible }}
+              onPress={() => alterna(h.serverId)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+            >
+              <Marca size={12} color={tenue} />
+              <Text style={{ color: visible ? theme.colors.foreground : tenue, fontSize: 12 }}>{h.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    ) : null;
+    const visibles = todos.filter((h) => !ocultos.includes(h.serverId));
+    // Every host hidden: the bare title stays, or the menu could never be opened again.
+    if (visibles.length === 0) {
+      return (
+        <View>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 16, paddingVertical: 6 }}>
+            <Text style={{ color: tenue, fontSize: 12, flex: 1 }}>Agentes · ningún host</Text>
+            {boton}
+          </View>
+          {lista}
+        </View>
+      );
+    }
+    const secciones = visibles.map((h, i) => (
+      <BloqueHost
+        key={h.serverId}
+        theme={theme}
+        host={{ ...host, id: h.serverId, label: h.label }}
+        abre={abre}
+        enPanel={enPanel}
+        workspaceId={h.serverId === host.id ? workspaceId : undefined}
+        almacen={almacenDe(h.serverId, h.serverId === host.id)}
+        etiqueta={h.label}
+        partes={visibles.length}
+        boton={i === 0 ? boton : null}
+        menu={i === 0 ? lista : null}
+      />
+    ));
     return enPanel ? <ScrollView style={{ flex: 1 }}>{secciones}</ScrollView> : <View>{secciones}</View>;
   }
 
-  function BloqueHost({ theme, host, abre: abreEn, enPanel, workspaceId, almacen: datos, etiqueta, partes }: PropsBloque & { almacen: Almacen; etiqueta: string | null; partes: number }) {
+  function BloqueHost({ theme, host, abre: abreEn, enPanel, workspaceId, almacen: datos, etiqueta, partes, boton = null, menu = null }: PropsBloque & { almacen: Almacen; etiqueta: string | null; partes: number; boton?: React.ReactNode; menu?: React.ReactNode }) {
     const { suscribe, lee, usa, pliega, terminos, nuevoAgente, nuevoWorkspace } = datos;
     const abre = (agentId: string) => abreEn(agentId, host.id);
     const { agentes, subagentes, vigilantes, workspaces, proyectos, tareas, contexto, espera, plegado, error } = useSyncExternalStore(suscribe, lee);
@@ -725,7 +777,9 @@ export function contributeAgentes(client: PluginClientContext): () => void {
               <Cambio size={12} color={tenue} />
             </Pressable>
           ) : null}
+          {boton}
         </Pressable>
+        {menu}
         {error && !cerrado ? <Text style={[texto, sangria, { color: theme.colors.statusDanger }]}>{`Agentes: ${error}`}</Text> : null}
         {cerrado ? null : (
           // Several hosts share the space: the panel scrolls them all at once, the sidebar gives each its share of the height.
